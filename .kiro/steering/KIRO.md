@@ -1,0 +1,214 @@
+# CLAUDE.md - Dev Sentinel
+
+## Language Preferences
+
+- **Conversation**: Always respond in Korean
+- **Documentation & Code**: Write in English by default (unless explicitly requested otherwise)
+
+## Git Commit Rules
+
+- **Do NOT add Co-Authored-By** line in commit messages
+- Before committing or pushing, ALWAYS review the code to ensure you're not uploading any security-related credentials.
+
+## Code Deletion Policy
+
+- **Deleting unused code MUST require explicit user approval.** Analysis and reporting are fine, but NEVER delete files or remove code without the user clearly saying to do so.
+
+## Documentation Lookup
+
+- **When implementing with frameworks or libraries (e.g., Zod, Commander, better-sqlite3, Jest, fast-check, AWS SDK), ALWAYS use context7 MCP to fetch up-to-date documentation first.** Do not rely on memory alone — API surfaces change across versions.
+
+## Anti-Patterns (NEVER use)
+
+- **Keyword matching / hardcoded word lists**: Do NOT use hardcoded keyword sets, phrase lists, or regex-based classification for analysis tasks. All analysis (intent, sentiment, frustration detection, lesson summarization) MUST use LLM. If you need to improve extraction quality, use LLM summarization, not string matching.
+- **Over-abstraction**: No CachedAnalyzer wrappers, ParallelAgent wrappers, StreamingPipeline wrappers, or ReflectiveJudge wrappers. Keep pipeline stages as direct function calls.
+- **Observer/state machine for sentiment**: Do NOT use a state machine to track frustration→resolution patterns. Use LLM analysis on the prompt directly.
+
+---
+
+## Project Overview
+
+> **We fail every day, but that failure becomes the success of our next attempt.**
+
+Dev Sentinel watches Claude Code sessions and does two things:
+1. **Warns** when you're about to repeat a past failure (Active Recall)
+2. **Captures** new failure experiences for future reference (Experience Capture)
+
+Claude has zero knowledge of Sentinel — the prompt passes through unchanged.
+
+---
+
+## Architecture: Unified Frustration Pipeline
+
+```
+UserPromptSubmit hook:
+  prompt
+  └─ LLM: frustration analysis → type?
+     ├─ frustrated → setFlag('frustrated') + searchMemory()
+     │                ├─ match → systemMessage (Active Recall)
+     │                └─ no match → wait for outcome
+     ├─ resolution/abandonment → upgradeFlag('capture')
+     └─ normal → pass through (stdout: '{}')
+
+Stop hook (fires after every Claude response):
+  flag status?
+  ├─ 'capture' → parse transcript → create draft → clearFlag()
+  └─ otherwise → skip (stdout: '{"decision":"approve"}')
+
+User (async):
+  sentinel review list → confirm/reject drafts
+  confirmed → experiences table + vector store
+```
+
+### Key Design Decisions
+
+1. **Single analysis point**: Frustration detection happens ONCE in UserPromptSubmit, not split across hooks
+2. **2-stage flag capture**: `'frustrated'` (waiting for outcome) → `'capture'` (ready for draft). Prevents incomplete drafts since Stop hook fires after every response.
+3. **LLM-only analysis**: No keyword fallback, no state machines. LLM fails → graceful skip
+4. **Local-first**: All data stored locally. Cloud LLM is opt-in
+5. **Graceful degradation**: Every pipeline stage is individually try-caught. Sentinel failure never affects Claude Code
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Language | TypeScript (strict mode) |
+| Runtime | Node.js |
+| Metadata DB | SQLite (better-sqlite3) |
+| Vector DB | SQLite-backed vector store |
+| Embedding | Ollama (qwen3-embedding) / AWS Bedrock (Titan) |
+| LLM | Ollama (local, default) / AWS Bedrock (cloud, opt-in) |
+| Testing | Jest + fast-check (property-based) |
+| CLI | Commander |
+| Validation | Zod |
+
+---
+
+## Directory Structure (target)
+
+```
+src/
+├── types/                    # TypeScript interfaces + Zod schemas
+├── llm/                      # LLM provider abstraction
+│   ├── local-llm-provider.ts    # Ollama
+│   ├── bedrock-llm-provider.ts  # AWS Bedrock
+│   ├── mock-llm-provider.ts     # Testing
+│   ├── llm-provider-manager.ts  # Provider selection + fallback
+│   └── prompts.ts               # System prompts
+├── storage/                  # Data persistence
+│   ├── sqlite-store.ts          # Metadata DB
+│   └── vector-store.ts          # Embedding storage + search
+├── analysis/                 # Frustration detection
+│   └── frustration-analyzer.ts  # LLM-based: normal|frustrated|resolution|abandonment
+├── capture/                  # Experience Capture (Stop hook)
+│   ├── transcript-parser.ts     # JSONL transcript → structured data
+│   └── note-generator.ts        # structured data → failure note draft
+├── recall/                   # Active Recall (UserPromptSubmit hook)
+│   └── memory-matcher.ts        # RAG: search vector store + judge relevance
+├── hook/                     # Claude Code hook handlers
+│   ├── user-prompt-submit-handler.ts
+│   └── stop-hook-handler.ts
+├── config/                   # Configuration
+│   └── settings-loader.ts
+└── cli.ts                    # CLI entry point
+
+tests/
+├── unit/
+└── property/
+```
+
+---
+
+## Core Components
+
+### 1. LLM Provider (`src/llm/`)
+- `LLMProvider` interface: `generateCompletion(system, user)`, `generateEmbedding(text)`, `isAvailable()`
+- Ollama provider (local, default)
+- Bedrock provider (cloud, opt-in via settings)
+- Mock provider (testing)
+- Provider manager: provider selection, health check, graceful fallback
+
+### 2. Vector Store (`src/storage/vector-store.ts`)
+- SQLite-backed vector storage
+- Cosine similarity search
+- Dimension-agnostic (adapts to embedding model)
+
+### 3. Transcript Parser (`src/capture/transcript-parser.ts`)
+- Parse Claude Code JSONL transcript files
+- Extract: user messages, assistant messages, tool calls, error messages
+- Structured `TranscriptData` output
+
+### 4. Frustration Analyzer (`src/analysis/frustration-analyzer.ts`)
+- Single LLM call per prompt → `{ type, confidence, intent, context }`
+- `type`: `'normal'` | `'frustrated'` | `'resolution'` | `'abandonment'`
+- Graceful fallback: `{ type: 'normal', confidence: 0 }` on any failure
+
+### 5. RAG Memory Matcher (`src/recall/memory-matcher.ts`)
+- Embed current prompt → search vector store for similar experiences
+- LLM judge: is the match actually relevant?
+- Returns match with confidence + suggested action
+
+### 6. CLI (`src/cli.ts`)
+- `sentinel review list` — pending drafts
+- `sentinel review confirm <id>` — draft → experience + vector store
+- `sentinel review reject <id>` — delete draft
+- `sentinel --hook user-prompt-submit` — hook mode
+- `sentinel --hook stop` — hook mode
+
+---
+
+## TDD-First Development (Mandatory)
+
+**ALL code changes MUST follow the TDD workflow.** Exceptions: pure docs, config files.
+
+| Agent | TDD Phase | Purpose |
+|-------|-----------|---------|
+| test-architect | RED | Design & write failing tests |
+| implementer | GREEN | Write minimal code to pass tests |
+| code-reviewer | Quality Gate | Review code, approve/reject |
+| refactorer | REFACTOR | Improve code without changing behavior |
+
+## Custom Subagents (TDD Multi-Agent System)
+
+This project uses a 4-agent TDD feedback loop. Agents are defined in `.claude/agents/`.
+
+| Agent | TDD Phase | Purpose |
+|-------|-----------|---------|
+| 🧪 `test-architect` | RED | Design & write failing tests |
+| ⚙️ `implementer` | GREEN | Write minimal code to pass tests |
+| 🔍 `code-reviewer` | Quality Gate | Review code, approve/reject |
+| ✨ `refactorer` | REFACTOR | Improve code without changing behavior |
+
+### TDD Cycle Rules
+
+```
+🧪 test-architect → ⚙️ implementer → 🔍 code-reviewer → ✨ refactorer
+                                           │
+                                      REJECT → back to implementer
+```
+
+1. **implementer MUST trigger code-reviewer** — After implementer reports "all tests pass", you MUST invoke code-reviewer before moving on. Never skip review just because tests pass.
+2. **code-reviewer MUST trigger refactorer** — After code-reviewer approves, you MUST invoke refactorer at least once. Even if the code looks clean, refactorer should confirm "no changes needed" explicitly.
+3. **If code-reviewer REJECTS** — Go back to implementer with the reviewer's feedback. Do NOT go directly to refactorer.
+4. **After refactorer completes** — Run tests one final time to confirm nothing broke. Only then is the task done.
+5. **Never self-approve** — The implementer agent must not also act as the reviewer. Each agent must perform its designated role independently.
+
+### What to Do When an Agent Seems Unnecessary
+
+Even if the implementation looks trivial (e.g., a one-liner), still run the full chain:
+- **code-reviewer** might catch dependency direction issues, missing error handling, or type safety problems that aren't visible from just "tests pass"
+- **refactorer** might identify shared patterns across files that should be extracted
+
+### Loop Rules
+
+- MAX 3 ITERATIONS per cycle
+- If unresolved after 3 loops: **STOP** and report to user
+- On task completion: **ASK** user confirmation before updating TODO.md
+
+---
+
+## Lessons Learned (from claude-sentinel v1)
+
+See `docs/LESSONS_LEARNED.md` for detailed technical lessons.

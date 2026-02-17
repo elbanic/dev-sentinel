@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local settings (contains user-specific paths)
+.claude/settings.local.json
+
+# Environment
+.env
+.env.local
+
+# SQLite databases
+*.db
+*.sqlite
+
+# Build output
+dist/
+
+# Coverage
+coverage/
+
+# Logs
+*.log

@@ -1,0 +1,44 @@
+{
+  "name": "dev-sentinel",
+  "version": "0.1.0",
+  "description": "Dev Sentinel watches Claude Code sessions to warn about past failures and capture new experiences",
+  "main": "dist/index.js",
+  "bin": {
+    "sentinel": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "prepare": "npm run build",
+    "test": "jest --testPathIgnorePatterns=frustration-analysis.integration",
+    "test:unit": "jest tests/unit",
+    "test:property": "jest tests/property",
+    "test:integration": "jest tests/integration",
+    "test:llm": "jest tests/integration/frustration-analysis.integration.test.ts",
+    "test:watch": "jest --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.991.0",
+    "@aws-sdk/credential-providers": "^3.993.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.2.3",
+    "better-sqlite3": "^12.6.2",
+    "commander": "^14.0.3",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "fast-check": "^4.5.3",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6"
+  }
+}

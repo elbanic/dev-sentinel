@@ -1,0 +1,187 @@
+import * as path from 'path';
+import * as os from 'os';
+import { randomUUID } from 'crypto';
+import type { LLMProvider } from '../types/index';
+import type { SqliteStore } from '../storage/sqlite-store';
+import { parseTranscriptFile } from '../capture/transcript-parser';
+import { debugLog } from '../utils/debug-log';
+
+const APPROVE_RESPONSE = '{"decision":"approve"}';
+
+/**
+ * Find the first frustrated turn's prompt and intent from session_turns.
+ * Returns { prompt, intent } or null if no frustrated turn found.
+ */
+function findFirstFrustratedTurn(
+  sessionId: string,
+  sqliteStore: SqliteStore,
+): { prompt: string; intent: string } | null {
+  try {
+    const turns = sqliteStore.getTurnsBySession(sessionId);
+    for (const turn of turns) {
+      try {
+        const analysis = JSON.parse(turn.analysis);
+        if (analysis.type === 'frustrated') {
+          return {
+            prompt: turn.prompt,
+            intent: analysis.intent ? String(analysis.intent).substring(0, 200) : '',
+          };
+        }
+      } catch {
+        // invalid JSON in analysis, skip
+      }
+    }
+  } catch {
+    // getTurnsBySession failed
+  }
+  return null;
+}
+
+/**
+ * Slice transcript messages from the first frustrated turn's prompt onward.
+ * If the frustrated prompt is not found in messages, returns all messages as fallback.
+ */
+function sliceTranscriptFromFrustration(
+  messages: Array<{ role: string; content: string }>,
+  frustratedPrompt: string,
+): Array<{ role: string; content: string }> {
+  const idx = messages.findIndex(
+    (m) => m.role === 'user' && m.content.includes(frustratedPrompt.substring(0, 50)),
+  );
+  if (idx >= 0) {
+    return messages.slice(idx);
+  }
+  return messages;
+}
+
+/**
+ * Run the capture pipeline: parse transcript -> slice from frustration point -> store raw candidate (no LLM).
+ */
+function runCapturePipeline(
+  sessionId: string,
+  transcriptPath: string,
+  sqliteStore: SqliteStore,
+): void {
+  const sentinelDir = path.join(os.homedir(), '.sentinel');
+
+  // Step 1: Parse transcript
+  let transcriptData;
+  try {
+    transcriptData = parseTranscriptFile(transcriptPath);
+    debugLog(`[stop] parseTranscript: ${transcriptData ? `${transcriptData.messages.length} msgs` : 'null'}`, sentinelDir);
+  } catch (e) {
+    debugLog(`[stop] parseTranscript error: ${e}`, sentinelDir);
+    return;
+  }
+
+  if (!transcriptData || transcriptData.messages.length === 0) {
+    debugLog('[stop] transcriptData is null or empty, skipping', sentinelDir);
+    return;
+  }
+
+  // Step 2: Find frustrated turn and slice transcript from that point
+  const frustratedTurn = findFirstFrustratedTurn(sessionId, sqliteStore);
+  let errorSummary = '';
+
+  if (frustratedTurn) {
+    errorSummary = frustratedTurn.intent;
+    debugLog(`[stop] frustrated turn found, intent: ${errorSummary}`, sentinelDir);
+
+    // Slice transcript: only keep messages from the frustrated prompt onward
+    const slicedMessages = sliceTranscriptFromFrustration(
+      transcriptData.messages,
+      frustratedTurn.prompt,
+    );
+    debugLog(`[stop] transcript sliced: ${transcriptData.messages.length} → ${slicedMessages.length} msgs`, sentinelDir);
+    transcriptData = {
+      ...transcriptData,
+      messages: slicedMessages,
+    };
+  } else {
+    debugLog('[stop] no frustrated turn found, using full transcript', sentinelDir);
+  }
+
+  // Step 3: Dedup check + store candidate with (sliced) raw transcript
+  try {
+    const pendingDrafts = sqliteStore.getPendingDrafts();
+    const hasDuplicate = pendingDrafts.some(
+      (draft) => draft.sessionId === sessionId,
+    );
+    if (hasDuplicate) {
+      debugLog('[stop] duplicate draft, skipping', sentinelDir);
+      return;
+    }
+
+    const candidateId = randomUUID();
+    sqliteStore.storeCandidate({
+      id: candidateId,
+      sessionId,
+      transcriptData: JSON.stringify(transcriptData),
+      frustrationSignature: errorSummary,
+      failedApproaches: [],
+      successfulApproach: undefined,
+      lessons: [],
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+    debugLog(`[stop] storeCandidate: ${candidateId} (raw transcript, ${transcriptData.messages.length} msgs)`, sentinelDir);
+  } catch (e) {
+    debugLog(`[stop] storeCandidate error: ${e}`, sentinelDir);
+  }
+}
+
+/**
+ * Safely clear the session flag. Swallows any errors.
+ */
+function safeClearFlag(sqliteStore: SqliteStore, sessionId: string): void {
+  try {
+    sqliteStore.clearFlag(sessionId);
+  } catch {
+    // Even if clearFlag throws, swallow the error
+  }
+}
+
+/**
+ * Stop Hook Handler - fires after every Claude response.
+ *
+ * Checks session flag status and, if status === 'capture', stores the raw
+ * transcript as a candidate (no LLM call). LLM summarization happens later
+ * when the user runs `sentinel review confirm`.
+ *
+ * Always returns '{"decision":"approve"}'. Never throws.
+ */
+export async function handleStop(input: {
+  sessionId: string;
+  transcriptPath: string;
+  llmProvider: LLMProvider;
+  sqliteStore: SqliteStore;
+}): Promise<string> {
+  try {
+    const { sessionId, transcriptPath, sqliteStore } = input;
+
+    if (!sessionId) {
+      return APPROVE_RESPONSE;
+    }
+
+    let flag: ReturnType<SqliteStore['getFlag']>;
+    try {
+      flag = sqliteStore.getFlag(sessionId);
+    } catch {
+      return APPROVE_RESPONSE;
+    }
+
+    if (!flag || flag.status !== 'capture') {
+      return APPROVE_RESPONSE;
+    }
+
+    try {
+      runCapturePipeline(sessionId, transcriptPath, sqliteStore);
+    } finally {
+      safeClearFlag(sqliteStore, sessionId);
+    }
+
+    return APPROVE_RESPONSE;
+  } catch {
+    return APPROVE_RESPONSE;
+  }
+}
