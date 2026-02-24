@@ -33,6 +33,11 @@ const SENTINEL_STOP_HOOK = {
   hooks: [{ type: 'command', command: 'sentinel --hook stop' }],
 };
 
+const SENTINEL_SESSION_END_HOOK = {
+  matcher: '',
+  hooks: [{ type: 'command', command: 'sentinel --hook session-end' }],
+};
+
 // ---------------------------------------------------------------------------
 // Helper: check if a sentinel hook already exists in a hook array
 // ---------------------------------------------------------------------------
@@ -92,6 +97,10 @@ export async function initCommand(options: InitOptions): Promise<InitResult> {
       existingSettings.hooks.Stop = [];
     }
 
+    if (!Array.isArray(existingSettings.hooks.SessionEnd)) {
+      existingSettings.hooks.SessionEnd = [];
+    }
+
     if (
       !hasSentinelHook(
         existingSettings.hooks.UserPromptSubmit,
@@ -107,6 +116,12 @@ export async function initCommand(options: InitOptions): Promise<InitResult> {
       !hasSentinelHook(existingSettings.hooks.Stop, 'sentinel --hook stop')
     ) {
       existingSettings.hooks.Stop.push(SENTINEL_STOP_HOOK);
+    }
+
+    if (
+      !hasSentinelHook(existingSettings.hooks.SessionEnd, 'sentinel --hook session-end')
+    ) {
+      existingSettings.hooks.SessionEnd.push(SENTINEL_SESSION_END_HOOK);
     }
 
     fs.writeFileSync(
@@ -127,7 +142,9 @@ export async function initCommand(options: InitOptions): Promise<InitResult> {
             hasSentinelHook(localSettings.hooks.UserPromptSubmit, 'sentinel --hook user-prompt-submit');
           const hasStop = Array.isArray(localSettings.hooks.Stop) &&
             hasSentinelHook(localSettings.hooks.Stop, 'sentinel --hook stop');
-          if (hasUPS || hasStop) {
+          const hasSessionEnd = Array.isArray(localSettings.hooks.SessionEnd) &&
+            hasSentinelHook(localSettings.hooks.SessionEnd, 'sentinel --hook session-end');
+          if (hasUPS || hasStop || hasSessionEnd) {
             warnings.push(
               'Sentinel hooks found in .claude/settings.local.json. Remove them to avoid duplicate invocations.'
             );
@@ -168,6 +185,10 @@ export async function initCommand(options: InitOptions): Promise<InitResult> {
       existingSettings.hooks.Stop = [];
     }
 
+    if (!Array.isArray(existingSettings.hooks.SessionEnd)) {
+      existingSettings.hooks.SessionEnd = [];
+    }
+
     if (
       !hasSentinelHook(
         existingSettings.hooks.UserPromptSubmit,
@@ -183,6 +204,12 @@ export async function initCommand(options: InitOptions): Promise<InitResult> {
       !hasSentinelHook(existingSettings.hooks.Stop, 'sentinel --hook stop')
     ) {
       existingSettings.hooks.Stop.push(SENTINEL_STOP_HOOK);
+    }
+
+    if (
+      !hasSentinelHook(existingSettings.hooks.SessionEnd, 'sentinel --hook session-end')
+    ) {
+      existingSettings.hooks.SessionEnd.push(SENTINEL_SESSION_END_HOOK);
     }
 
     fs.writeFileSync(
@@ -203,7 +230,9 @@ export async function initCommand(options: InitOptions): Promise<InitResult> {
             hasSentinelHook(settingsJson.hooks.UserPromptSubmit, 'sentinel --hook user-prompt-submit');
           const hasStop = Array.isArray(settingsJson.hooks.Stop) &&
             hasSentinelHook(settingsJson.hooks.Stop, 'sentinel --hook stop');
-          if (hasUPS || hasStop) {
+          const hasSessionEnd = Array.isArray(settingsJson.hooks.SessionEnd) &&
+            hasSentinelHook(settingsJson.hooks.SessionEnd, 'sentinel --hook session-end');
+          if (hasUPS || hasStop || hasSessionEnd) {
             warnings.push(
               'Sentinel hooks found in .claude/settings.json. Remove them to avoid duplicate invocations (hooks should only be in settings.local.json).'
             );

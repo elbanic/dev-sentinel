@@ -63,6 +63,10 @@ jest.mock('../../src/hook/stop-hook-handler', () => ({
   handleStop: jest.fn(),
 }));
 
+jest.mock('../../src/hook/session-end-handler', () => ({
+  handleSessionEnd: jest.fn(),
+}));
+
 import { handleUserPromptSubmit } from '../../src/hook/user-prompt-submit-handler';
 import { handleStop } from '../../src/hook/stop-hook-handler';
 
@@ -70,6 +74,9 @@ const mockedHandleUserPromptSubmit = handleUserPromptSubmit as jest.MockedFuncti
   typeof handleUserPromptSubmit
 >;
 const mockedHandleStop = handleStop as jest.MockedFunction<typeof handleStop>;
+
+import { handleSessionEnd } from '../../src/hook/session-end-handler';
+const mockedHandleSessionEnd = handleSessionEnd as jest.MockedFunction<typeof handleSessionEnd>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -255,6 +262,33 @@ describe('CLI - enabled flag early exit', () => {
 
       // Assert
       expect(mockedHandleStop).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // enabled=false + --hook session-end -> empty output, no handler
+  // =========================================================================
+  describe('enabled=false + hook mode: session-end', () => {
+    it('should NOT call handleSessionEnd when enabled is false', async () => {
+      // Arrange
+      const stdinJson = JSON.stringify({
+        session_id: 'session-disabled-se-001',
+        transcript_path: '/tmp/transcript.jsonl',
+      });
+      mockedHandleSessionEnd.mockResolvedValue(undefined);
+
+      // Act
+      const { output } = await runCommand(['--hook', 'session-end'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+        stdinData: stdinJson,
+        enabled: false,
+      });
+
+      // Assert
+      expect(output).toBe('');
+      expect(mockedHandleSessionEnd).not.toHaveBeenCalled();
     });
   });
 

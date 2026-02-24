@@ -14,6 +14,7 @@ import { loadSettings, resolveFrustrationThreshold } from './config/settings-loa
 import { initCommand } from './cli/init-command';
 import { handleUserPromptSubmit } from './hook/user-prompt-submit-handler';
 import { handleStop } from './hook/stop-hook-handler';
+import { handleSessionEnd } from './hook/session-end-handler';
 import { resolveHome } from './utils/resolve-home';
 import { debugLog } from './utils/debug-log';
 import { toggleSentinelEnabled, setSentinelSetting } from './config/toggle-enabled';
@@ -208,6 +209,17 @@ export function createProgram(deps: CreateProgramDeps): Command {
         write(result);
       } catch {
         write('{"decision":"approve"}');
+      }
+    } else if (hookName === 'session-end') {
+      try {
+        const parsed = JSON.parse(stdin ?? '{}');
+        await handleSessionEnd({
+          sessionId: parsed.session_id ?? '',
+          transcriptPath: parsed.transcript_path ?? '',
+          sqliteStore,
+        });
+      } catch {
+        // SessionEnd errors are silently ignored -- no output
       }
     } else {
       // Unknown hook name
@@ -1064,6 +1076,8 @@ async function main(): Promise<void> {
       const hookName = process.argv[process.argv.indexOf('--hook') + 1];
       if (hookName === 'stop') {
         process.stdout.write('{"decision":"approve"}');
+      } else if (hookName === 'session-end') {
+        // No output needed for session-end
       } else {
         process.stdout.write('{}');
       }

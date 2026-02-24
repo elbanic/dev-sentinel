@@ -70,6 +70,10 @@ jest.mock('../../src/hook/stop-hook-handler', () => ({
   handleStop: jest.fn(),
 }));
 
+jest.mock('../../src/hook/session-end-handler', () => ({
+  handleSessionEnd: jest.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

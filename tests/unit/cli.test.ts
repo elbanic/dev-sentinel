@@ -58,6 +58,10 @@ jest.mock('../../src/hook/stop-hook-handler', () => ({
   handleStop: jest.fn(),
 }));
 
+jest.mock('../../src/hook/session-end-handler', () => ({
+  handleSessionEnd: jest.fn(),
+}));
+
 import { handleUserPromptSubmit } from '../../src/hook/user-prompt-submit-handler';
 import { handleStop } from '../../src/hook/stop-hook-handler';
 
@@ -65,6 +69,9 @@ const mockedHandleUserPromptSubmit = handleUserPromptSubmit as jest.MockedFuncti
   typeof handleUserPromptSubmit
 >;
 const mockedHandleStop = handleStop as jest.MockedFunction<typeof handleStop>;
+
+import { handleSessionEnd } from '../../src/hook/session-end-handler';
+const mockedHandleSessionEnd = handleSessionEnd as jest.MockedFunction<typeof handleSessionEnd>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -775,6 +782,77 @@ describe('CLI - createProgram', () => {
 
       // Assert
       expect(output).toContain('{"decision":"approve"}');
+    });
+  });
+
+  // =========================================================================
+  // --hook session-end: routes stdin to session-end handler
+  // =========================================================================
+  describe('--hook session-end', () => {
+    it('should call handleSessionEnd with correct parameters', async () => {
+      // Arrange
+      const stdinJson = JSON.stringify({
+        session_id: 'session-end-001',
+        transcript_path: '/tmp/transcript.jsonl',
+      });
+      mockedHandleSessionEnd.mockResolvedValue(undefined);
+
+      // Act
+      const { output } = await runCommand(['--hook', 'session-end'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+        stdinData: stdinJson,
+      });
+
+      // Assert
+      expect(mockedHandleSessionEnd).toHaveBeenCalledTimes(1);
+      expect(mockedHandleSessionEnd).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-end-001',
+          transcriptPath: '/tmp/transcript.jsonl',
+        }),
+      );
+    });
+
+    it('should produce NO stdout output for session-end hook', async () => {
+      // Arrange
+      const stdinJson = JSON.stringify({
+        session_id: 'session-end-002',
+        transcript_path: '/tmp/transcript.jsonl',
+      });
+      mockedHandleSessionEnd.mockResolvedValue(undefined);
+
+      // Act
+      const { output } = await runCommand(['--hook', 'session-end'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+        stdinData: stdinJson,
+      });
+
+      // Assert: SessionEnd does NOT produce stdout
+      expect(output).toBe('');
+    });
+
+    it('should silently ignore handler errors for session-end hook', async () => {
+      // Arrange
+      const stdinJson = JSON.stringify({
+        session_id: 'session-end-003',
+        transcript_path: '/tmp/transcript.jsonl',
+      });
+      mockedHandleSessionEnd.mockRejectedValue(new Error('handler crash'));
+
+      // Act
+      const { output, errorOutput } = await runCommand(['--hook', 'session-end'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+        stdinData: stdinJson,
+      });
+
+      // Assert: no output, no error, no throw
+      expect(output).toBe('');
     });
   });
 

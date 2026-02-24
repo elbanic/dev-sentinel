@@ -42,7 +42,7 @@ function findFirstFrustratedTurn(
  * Run the capture pipeline: parse transcript -> store full raw transcript as candidate (no LLM).
  * Context extraction is deferred to `sentinel review confirm`.
  */
-function runCapturePipeline(
+export function runCapturePipeline(
   sessionId: string,
   transcriptPath: string,
   sqliteStore: SqliteStore,
@@ -108,7 +108,7 @@ function runCapturePipeline(
 /**
  * Safely clear the session flag. Swallows any errors.
  */
-function safeClearFlag(sqliteStore: SqliteStore, sessionId: string): void {
+export function safeClearFlag(sqliteStore: SqliteStore, sessionId: string): void {
   try {
     sqliteStore.clearFlag(sessionId);
   } catch {

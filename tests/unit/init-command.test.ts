@@ -9,7 +9,7 @@
  *   initCommand(options: InitOptions): Promise<InitResult>
  *
  * Behavior:
- *   1. Create .claude/settings.local.json with hook config (UserPromptSubmit + Stop)
+ *   1. Create .claude/settings.local.json with hook config (UserPromptSubmit + Stop + SessionEnd)
  *   2. If .claude/settings.local.json already exists, MERGE (don't overwrite existing hooks)
  *   3. If sentinel hooks already configured, don't duplicate them
  *   4. Create ~/.sentinel/ directory
@@ -40,6 +40,9 @@
  *   - Empty hooks object in existing settings
  *   - No hooks property in existing settings
  *   - Running init twice (full idempotency)
+ *   - SessionEnd hook registration (local and global scope)
+ *   - SessionEnd hook idempotency (no duplicates on re-run)
+ *   - Cross-scope duplicate detection for SessionEnd hooks
  */
 
 import * as fs from 'fs';
@@ -68,6 +71,12 @@ const EXPECTED_SENTINEL_HOOKS = {
       {
         matcher: '',
         hooks: [{ type: 'command', command: 'sentinel --hook stop' }],
+      },
+    ],
+    SessionEnd: [
+      {
+        matcher: '',
+        hooks: [{ type: 'command', command: 'sentinel --hook session-end' }],
       },
     ],
   },
@@ -197,6 +206,25 @@ describe('initCommand', () => {
       expect(settings.hooks.Stop[0]).toEqual({
         matcher: '',
         hooks: [{ type: 'command', command: 'sentinel --hook stop' }],
+      });
+    });
+
+    it('should write correct SessionEnd hook in settings.local.json', async () => {
+      // Arrange
+      const options = makeOptions();
+
+      // Act
+      await initCommand(options);
+
+      // Assert
+      const settingsPath = path.join(projectDir, '.claude', 'settings.local.json');
+      const settings = readJsonFile(settingsPath) as Record<string, any>;
+
+      expect(settings.hooks.SessionEnd).toBeDefined();
+      expect(settings.hooks.SessionEnd).toHaveLength(1);
+      expect(settings.hooks.SessionEnd[0]).toEqual({
+        matcher: '',
+        hooks: [{ type: 'command', command: 'sentinel --hook session-end' }],
       });
     });
 
@@ -501,6 +529,32 @@ describe('initCommand', () => {
       expect(sentinelHooks).toHaveLength(1);
     });
 
+    it('should NOT duplicate SessionEnd sentinel hook when already present', async () => {
+      // Arrange
+      writeProjectFile(
+        '.claude/settings.local.json',
+        JSON.stringify(EXPECTED_SENTINEL_HOOKS, null, 2),
+      );
+
+      const options = makeOptions();
+
+      // Act
+      await initCommand(options);
+
+      // Assert
+      const settingsPath = path.join(projectDir, '.claude', 'settings.local.json');
+      const settings = readJsonFile(settingsPath) as Record<string, any>;
+      const sessionEndHooks = settings.hooks.SessionEnd as any[];
+
+      const sentinelHooks = sessionEndHooks.filter(
+        (h: any) =>
+          h.hooks?.some(
+            (inner: any) => inner.command === 'sentinel --hook session-end',
+          ),
+      );
+      expect(sentinelHooks).toHaveLength(1);
+    });
+
     it('should still return a result even when nothing needs to be done', async () => {
       // Arrange: everything is already set up
       writeProjectFile(
@@ -552,6 +606,16 @@ describe('initCommand', () => {
               hooks: [{ type: 'command', command: 'my-logger --on-stop' }],
             },
           ],
+          SessionEnd: [
+            {
+              matcher: '',
+              hooks: [{ type: 'command', command: 'sentinel --hook session-end' }],
+            },
+            {
+              matcher: '',
+              hooks: [{ type: 'command', command: 'my-cleanup --on-end' }],
+            },
+          ],
         },
       };
       writeProjectFile(
@@ -573,6 +637,9 @@ describe('initCommand', () => {
 
       // Stop: 1 sentinel + 1 custom = 2
       expect(settings.hooks.Stop).toHaveLength(2);
+
+      // SessionEnd: 1 sentinel + 1 custom = 2
+      expect(settings.hooks.SessionEnd).toHaveLength(2);
     });
   });
 
@@ -995,9 +1062,16 @@ describe('initCommand', () => {
             (inner: any) => inner.command === 'sentinel --hook stop',
           ),
       );
+      const sentinelSessionEndHooks = settings.hooks.SessionEnd.filter(
+        (h: any) =>
+          h.hooks?.some(
+            (inner: any) => inner.command === 'sentinel --hook session-end',
+          ),
+      );
 
       expect(sentinelUserHooks).toHaveLength(1);
       expect(sentinelStopHooks).toHaveLength(1);
+      expect(sentinelSessionEndHooks).toHaveLength(1);
     });
   });
 
@@ -1086,6 +1160,25 @@ describe('initCommand', () => {
       expect(settings.hooks.Stop[0]).toEqual({
         matcher: '',
         hooks: [{ type: 'command', command: 'sentinel --hook stop' }],
+      });
+    });
+
+    it('scope global should write correct SessionEnd hook in global settings.json', async () => {
+      // Arrange
+      const options = makeOptions({ scope: 'global' });
+
+      // Act
+      await initCommand(options);
+
+      // Assert
+      const globalSettingsPath = path.join(homeDir, '.claude', 'settings.json');
+      const settings = readJsonFile(globalSettingsPath) as Record<string, any>;
+
+      expect(settings.hooks.SessionEnd).toBeDefined();
+      expect(settings.hooks.SessionEnd).toHaveLength(1);
+      expect(settings.hooks.SessionEnd[0]).toEqual({
+        matcher: '',
+        hooks: [{ type: 'command', command: 'sentinel --hook session-end' }],
       });
     });
 
@@ -1225,6 +1318,31 @@ describe('initCommand', () => {
         (w: string) => w.toLowerCase().includes('duplicate') || w.toLowerCase().includes('settings.local.json'),
       );
       expect(duplicateWarning).toBeDefined();
+    });
+
+    it('scope global should detect cross-scope SessionEnd hook duplicates', async () => {
+      // Arrange: write local settings with SessionEnd hook
+      const localClaudeDir = path.join(projectDir, '.claude');
+      fs.mkdirSync(localClaudeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(localClaudeDir, 'settings.local.json'),
+        JSON.stringify({
+          hooks: {
+            SessionEnd: [
+              { matcher: '', hooks: [{ type: 'command', command: 'sentinel --hook session-end' }] },
+            ],
+          },
+        }),
+        'utf-8',
+      );
+
+      // Act: run init with global scope
+      const options = makeOptions({ scope: 'global' });
+      const result = await initCommand(options);
+
+      // Assert: should warn about duplicate
+      expect(result.warnings.length).toBeGreaterThan(0);
+      expect(result.warnings.some((w: string) => w.toLowerCase().includes('duplicate') || w.toLowerCase().includes('sentinel hooks found'))).toBe(true);
     });
 
     it('scope global should handle malformed ~/.claude/settings.json gracefully', async () => {
