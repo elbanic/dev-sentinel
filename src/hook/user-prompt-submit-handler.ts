@@ -96,7 +96,9 @@ export async function handleUserPromptSubmit(input: {
     ).length;
     if (otherDraftCount > 0) {
       messageParts.push(
-        `You have ${otherDraftCount} pending experience draft(s) awaiting review. Run "sentinel review list" to see them.`,
+        Math.random() < 0.5
+          ? `${otherDraftCount} pending draft(s). Run "sentinel review list" to review.`
+          : `${otherDraftCount} pending draft(s). Run "!sentinel review confirm --recent"`,
       );
     }
 

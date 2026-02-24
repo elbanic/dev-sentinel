@@ -123,19 +123,16 @@ Stop hook (stdin) — fires after EVERY Claude response
   │   └─ parseTranscriptFile(transcript_path)
   │   └─ Extract: user messages, assistant messages, tool calls, errors
   │
-  ├─ Step 3: Turn-based transcript slicing
+  ├─ Step 3: Frustration context lookup (no slicing)
   │   └─ findFirstFrustratedTurn(session_id)
   │       → Look up session_turns for first turn with type='frustrated'
   │       → Extract { prompt, intent } from that turn
-  │   └─ sliceTranscriptFromFrustration(messages, frustratedPrompt)
-  │       → Find the user message matching the frustrated prompt
-  │       → Keep only messages from that point onward
-  │       → Fallback: use full transcript if prompt not found
   │   └─ Use frustrated turn's intent as frustrationSignature (no LLM)
+  │   └─ Full transcript is stored as-is (no slicing)
   │
   ├─ Step 4: Save draft + clear flag
   │   └─ Dedup: skip if draft already exists for this session
-  │   └─ sqliteStore.storeCandidate(draft) — raw sliced transcript
+  │   └─ sqliteStore.storeCandidate(draft) — raw full transcript
   │   └─ sqliteStore.clearFlag(session_id)
   │
   └─ LLM summarization deferred to `sentinel review confirm`
@@ -143,13 +140,12 @@ Stop hook (stdin) — fires after EVERY Claude response
 stdout: '{"decision": "approve"}'
 ```
 
-### Turn-Based Transcript Slicing
+### Full Transcript Storage
 
-A single Claude Code session may cover multiple topics. When a user starts
-debugging topic A, resolves it, then hits frustration on topic B, the
-transcript for topic B should NOT include the earlier topic A conversation.
-
-**Strategy: slice from the first frustrated turn.**
+The Stop hook stores the **complete session transcript** without slicing.
+Context extraction is deferred to `sentinel review confirm`, where the LLM
+receives the full transcript along with frustration metadata to identify the
+relevant portion.
 
 ```
 session_turns (from UserPromptSubmit hook):
@@ -161,14 +157,16 @@ session_turns (from UserPromptSubmit hook):
   Turn 6: "Forget it, skip this"        → abandonment → flag='capture'
 
 Stop hook fires:
-  1. findFirstFrustratedTurn → Turn 5's prompt + intent
-  2. sliceTranscriptFromFrustration → messages from Turn 5 onward
-  3. Store sliced transcript (Turns 5-6 only, not Turns 1-4)
+  1. findFirstFrustratedTurn → Turn 5's prompt + intent (for frustrationSignature)
+  2. Store full transcript (all Turns 1-6)
+  3. On `review confirm`: LLM receives full transcript + "── Frustration Context ──"
+     section with the frustrated turn's prompt and intent, focusing analysis
+     on the relevant portion
 ```
 
-The matching is substring-based: the first 50 characters of the frustrated
-prompt are matched against user messages in the transcript. This handles
-minor formatting differences between the stored prompt and transcript content.
+This approach preserves the full context (earlier conversation may contain
+relevant setup information) while letting the LLM intelligently focus on
+the frustration-related portion during summarization.
 
 ### Note Generation (Lazy — on `review confirm`)
 
@@ -380,7 +378,7 @@ Turn N+2: Claude responds → Stop fires → flag = 'capture'
 | RAG search (when frustrated) | ~10% of prompts | < 2s | Embed + vector search + LLM judge |
 | Turn persistence | Every prompt | < 10ms | Single SQLite INSERT |
 | Flag check (Stop) | Every Stop | < 5ms | Single SQLite SELECT |
-| Transcript parse + slicing | Rare (~1/session) | < 100ms | File read + substring match |
+| Transcript parse + store | Rare (~1/session) | < 100ms | File read + SQLite INSERT |
 | LLM summarization (confirm) | Manual trigger | < 15s | `/api/generate` with think mode |
 
 ---

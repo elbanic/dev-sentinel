@@ -28,7 +28,7 @@
 
 ## Project Overview
 
-> **We fail every day, but that failure becomes the success of our next attempt.**
+> **What broke you guards you.**
 
 Dev Sentinel watches Claude Code sessions and does two things:
 1. **Warns** when you're about to repeat a past failure (Active Recall)

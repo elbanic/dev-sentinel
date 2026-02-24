@@ -78,6 +78,7 @@ export const FrustrationAnalysisSchema = z.object({
   confidence: confidenceScore,
   intent: z.string().optional(),
   context: z.string().optional(),
+  errorKeyword: z.string().optional(),
   reasoning: z.string(),
 });
 

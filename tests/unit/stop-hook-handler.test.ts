@@ -7,10 +7,9 @@
  *   2. If no flag or status !== 'capture' -> return '{"decision":"approve"}' immediately
  *   3. If status === 'capture':
  *      a. Parse the transcript file
- *      b. Find first frustrated turn for error summary + transcript slicing
- *      c. Slice transcript from the frustrated prompt onward
- *      d. Store the raw candidate (no LLM call — lazy summarization on confirm)
- *      e. Clear the flag (always, even when parse fails or storeCandidate fails)
+ *      b. Find first frustrated turn for error summary (no slicing)
+ *      c. Store the full raw transcript as candidate (no LLM call — lazy summarization on confirm)
+ *      d. Clear the flag (always, even when parse fails or storeCandidate fails)
  *   4. Always return '{"decision":"approve"}'
  *   5. NEVER throw
  *
@@ -20,7 +19,7 @@
  *   3.  flag = 'capture' -> full pipeline -> approve (raw transcript stored)
  *   4.  flag = 'capture' + parseTranscript returns null -> approve, clearFlag called
  *   5.  flag = 'capture' + parseTranscript returns empty messages -> approve, clearFlag called
- *   6.  flag = 'capture' + frustrated turn found -> sliced transcript stored
+ *   6.  flag = 'capture' + frustrated turn found -> full transcript stored
  *   7.  parseTranscriptFile throws -> approve (graceful)
  *   8.  invalid input (missing session_id) -> approve
  *   9.  storeCandidate throws -> approve (graceful), clearFlag still called
@@ -423,9 +422,9 @@ describe('StopHookHandler - handleStop', () => {
   });
 
   // =========================================================================
-  // 6. Turn-based transcript slicing
+  // 6. Full transcript storage (no slicing)
   // =========================================================================
-  describe('Test 6: turn-based transcript slicing', () => {
+  describe('Test 6: full transcript storage', () => {
     it('should use frustrated turn intent as frustrationSignature', async () => {
       const transcriptData = makeTranscriptData();
 
@@ -448,7 +447,65 @@ describe('StopHookHandler - handleStop', () => {
       expect(storedArg.frustrationSignature).toBe('Fix build failure');
     });
 
-    it('should slice transcript from frustrated prompt onward', async () => {
+    it('should prefer errorKeyword over intent for frustrationSignature', async () => {
+      const transcriptData = makeTranscriptData();
+
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'capture' }));
+      mockedParseTranscriptFile.mockReturnValue(transcriptData);
+      mockStore.getPendingDrafts.mockReturnValue([]);
+      mockStore.getTurnsBySession.mockReturnValue([
+        makeTurn({
+          prompt: 'This error again!',
+          analysis: JSON.stringify({
+            type: 'frustrated',
+            intent: 'Fix build failure',
+            errorKeyword: 'Module not found: ./missing-module',
+          }),
+        }),
+      ]);
+
+      await handleStop({
+        sessionId: 'session-errorkw',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
+      const storedArg = mockStore.storeCandidate.mock.calls[0][0];
+      expect(storedArg.frustrationSignature).toBe('Module not found: ./missing-module');
+    });
+
+    it('should fall back to intent when errorKeyword is empty', async () => {
+      const transcriptData = makeTranscriptData();
+
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'capture' }));
+      mockedParseTranscriptFile.mockReturnValue(transcriptData);
+      mockStore.getPendingDrafts.mockReturnValue([]);
+      mockStore.getTurnsBySession.mockReturnValue([
+        makeTurn({
+          prompt: 'This keeps failing',
+          analysis: JSON.stringify({
+            type: 'frustrated',
+            intent: 'Fix API timeout',
+            errorKeyword: '',
+          }),
+        }),
+      ]);
+
+      await handleStop({
+        sessionId: 'session-no-errorkw',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
+      const storedArg = mockStore.storeCandidate.mock.calls[0][0];
+      expect(storedArg.frustrationSignature).toBe('Fix API timeout');
+    });
+
+    it('should store full transcript when frustrated turn exists', async () => {
       const transcriptData = makeTranscriptData({
         messages: [
           { role: 'user', content: 'Fix the login bug' },
@@ -469,7 +526,7 @@ describe('StopHookHandler - handleStop', () => {
       ]);
 
       await handleStop({
-        sessionId: 'session-slice',
+        sessionId: 'session-full',
         transcriptPath: '/tmp/transcript.jsonl',
         llmProvider: mockLlmProvider,
         sqliteStore: mockStore as any,
@@ -478,9 +535,9 @@ describe('StopHookHandler - handleStop', () => {
       expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
       const storedArg = mockStore.storeCandidate.mock.calls[0][0];
       const storedTranscript: TranscriptData = JSON.parse(storedArg.transcriptData);
-      // Should only contain messages from the frustrated prompt onward (2 of 4)
-      expect(storedTranscript.messages).toHaveLength(2);
-      expect(storedTranscript.messages[0].content).toBe('Why does the API keep failing with 500?');
+      // Should store ALL 4 messages (no slicing)
+      expect(storedTranscript.messages).toHaveLength(4);
+      expect(storedTranscript.messages[0].content).toBe('Fix the login bug');
     });
 
     it('should use full transcript when no frustrated turn is found', async () => {

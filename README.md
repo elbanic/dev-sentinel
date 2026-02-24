@@ -1,7 +1,7 @@
 # Dev Sentinel
 
 <div align="center">
-<h3><em>"We fail every day, but that failure becomes the success of our next attempt."</em></h3>
+<h3><em>"What broke you guards you."</em></h3>
 </div>
 
 Dev Sentinel watches your Claude Code sessions and does two things:

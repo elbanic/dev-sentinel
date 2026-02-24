@@ -36,9 +36,16 @@ Respond with a JSON object containing:
 - confidence: a number between 0 and 1 following the calibration guide above
 - intent: a brief summary of what the user is trying to do
 - context: any relevant contextual information
+- errorKeyword: if type is "frustrated", a concise label for the core error or problem (e.g., "Module not found after file rename", "Jest mock state leaking between tests"). Empty string if type is not "frustrated" or no specific error is mentioned in the prompt.
 - reasoning: your explanation for the classification`,
 
   lessonSummarization: `You are a developer experience summarizer. Given a development session transcript, extract the story of trial and error — what the developer struggled with, what they tried, and what they learned.
+
+The transcript may contain a full session with multiple topics.
+If a "── Frustration Context ──" section is provided, use it to identify
+which part of the conversation is related to the frustration. Extract
+the relevant context (including prior attempts and setup that led to the
+frustration), then generalize and summarize the experience.
 
 The input contains sections:
 - "── Conversation ──": developer and assistant messages showing the flow of work

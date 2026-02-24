@@ -6,11 +6,23 @@
 
 ## Philosophy
 
-> **We fail every day, but that failure becomes the success of our next attempt.**
+> **What broke you guards you.**
 
-Developers repeat themselves. Same errors, same approaches, same failures. AI coding assistants give the same generic answers every time — they have no memory of what **this developer** tried before and why it failed.
+AI coding tools are project-scoped by design. Each session starts fresh —
+accumulated context degrades performance, and cross-project knowledge
+derails the current task. This is the right design.
 
-Sentinel fills that gap. It accumulates a developer's failure experiences and surfaces past lessons at the moment they're about to repeat the same mistake.
+However, developers repeat themselves. Similar errors, similar approaches,
+similar failures — and eventually, a hard-won lesson. But that lesson
+lives only in the developer's head, invisible to any tool, lost across
+sessions and projects.
+
+What if those experiences of failure and frustration could be generalized
+to help you before you repeat them?
+
+Sentinel is not about project or organization-level knowledge sharing.
+It is a developer's personal experience, generalized and recalled at the
+right moment — "you've been here before."
 
 ---
 

@@ -23,7 +23,7 @@
  *
  * Error detection:
  *   - tool_result with non-null error -> added to errors array
- *   - tool output matching error patterns (Error:, TypeError, etc.) -> added to errors array
+ *   - Only explicit error fields are captured (no keyword matching on output text)
  *
  * Test points: 16 unit tests covering all parsing rules, edge cases,
  * and error handling.
@@ -255,32 +255,24 @@ describe('TranscriptParser - parseTranscriptFile', () => {
       expect(result!.errors[0]).toContain('Permission denied');
     });
 
-    // Test 6: Error detection from tool output via regex patterns
-    it('should detect errors in tool output matching known error patterns', () => {
-      // Arrange: tool outputs containing various error patterns
+    // Test 6: No keyword matching on tool output text
+    it('should NOT detect errors from output text alone (no keyword matching)', () => {
+      // Arrange: tool outputs containing text that looks like errors, but no explicit error field
       const lines = [
+        { type: 'human', message: { role: 'user', content: 'Run the build' } },
         { type: 'tool_result', name: 'Bash', output: 'Error: Module not found', error: null },
         { type: 'tool_result', name: 'Bash', output: 'TypeError: Cannot read properties of undefined', error: null },
-        { type: 'tool_result', name: 'Bash', output: 'SyntaxError: Unexpected token', error: null },
-        { type: 'tool_result', name: 'Bash', output: 'ReferenceError: x is not defined', error: null },
         { type: 'tool_result', name: 'Bash', output: 'ENOENT: no such file or directory', error: null },
-        { type: 'tool_result', name: 'Bash', output: 'EPERM: operation not permitted', error: null },
-        { type: 'tool_result', name: 'Bash', output: 'error: failed to compile', error: null },
       ];
       const filePath = writeTmpJsonl(lines);
 
       // Act
       const result = parseTranscriptFile(filePath);
 
-      // Assert
+      // Assert: no errors detected since there's no explicit error field
+      // (LLM handles error detection at review time, not regex)
       expect(result).not.toBeNull();
-      // Each tool output with an error pattern should produce an error entry
-      expect(result!.errors.length).toBe(7);
-      // Verify at least some specific patterns are captured
-      const errors: string[] = result!.errors;
-      expect(errors.some((e: string) => e.includes('Module not found'))).toBe(true);
-      expect(errors.some((e: string) => e.includes('TypeError'))).toBe(true);
-      expect(errors.some((e: string) => e.includes('ENOENT'))).toBe(true);
+      expect(result!.errors).toHaveLength(0);
     });
 
     // Additional: orphan tool_result with null error and clean output -> no errors, no toolCalls
@@ -302,9 +294,9 @@ describe('TranscriptParser - parseTranscriptFile', () => {
       expect(result!.errors).toHaveLength(0);
     });
 
-    // Additional: tool_result with both error field and error in output
-    it('should capture both explicit error field and error patterns in output', () => {
-      // Arrange: error field is set AND output also contains error pattern
+    // Additional: tool_result with both error field and error-like output text
+    it('should only capture explicit error field, not patterns in output text', () => {
+      // Arrange: error field is set AND output also contains error-like text
       const lines = [
         {
           type: 'tool_result',
@@ -318,10 +310,10 @@ describe('TranscriptParser - parseTranscriptFile', () => {
       // Act
       const result = parseTranscriptFile(filePath);
 
-      // Assert
+      // Assert: only the explicit error field is captured, not the output text
       expect(result).not.toBeNull();
-      // Should have at least the explicit error; may have both
-      expect(result!.errors.length).toBeGreaterThanOrEqual(1);
+      expect(result!.errors).toHaveLength(1);
+      expect(result!.errors[0]).toBe('Process exited with code 1');
     });
   });
 
@@ -588,10 +580,9 @@ describe('TranscriptParser - parseTranscriptFile', () => {
       // At minimum we expect the tool_use entries
       expect(result!.toolCalls.length).toBeGreaterThanOrEqual(2);
 
-      // Errors: "Error: Module not found" pattern matched in tool_result output
-      expect(result!.errors.length).toBeGreaterThanOrEqual(1);
-      const errors: string[] = result!.errors;
-      expect(errors.some((e: string) => e.includes('Module not found'))).toBe(true);
+      // Errors: only explicit error fields are captured (no regex on output text)
+      // The tool_result entries in this test have error: null, so no errors captured
+      expect(result!.errors).toHaveLength(0);
     });
   });
 
@@ -762,12 +753,9 @@ describe('TranscriptParser - parseTranscriptFile', () => {
       expect(result!.toolCalls).toHaveLength(0);
     });
 
-    // Test: Orphan tool_result still detects errors in its content
-    // Even when a tool_result has no matching tool_use, error patterns in
-    // its content should still be captured in the errors array.
-    it('should detect errors from orphan tool_result content even without matching tool_use', () => {
-      // Arrange: a user message for non-null result, then a user message with
-      // an orphan tool_result containing an error pattern
+    // Test: Orphan tool_result content text is NOT scanned for keywords
+    it('should NOT detect errors from orphan tool_result content text (no keyword matching)', () => {
+      // Arrange: orphan tool_result with error-like text in content but no explicit error field
       const lines = [
         {
           type: 'human',
@@ -790,11 +778,9 @@ describe('TranscriptParser - parseTranscriptFile', () => {
 
       // Assert
       expect(result).not.toBeNull();
-      // Orphan should NOT be in toolCalls
       expect(result!.toolCalls).toHaveLength(0);
-      // But error patterns should still be detected
-      expect(result!.errors.length).toBeGreaterThanOrEqual(1);
-      expect(result!.errors.some((e: string) => e.includes('ENOENT'))).toBe(true);
+      // No errors: content text is not scanned for keywords
+      expect(result!.errors).toHaveLength(0);
     });
 
     // Test: Standalone tool_result entry pairs with tool_use in content

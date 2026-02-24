@@ -605,6 +605,37 @@ describe('FrustrationAnalyzer - analyzeFrustration', () => {
       expect(result.confidence).toBeCloseTo(0.75);
       expect(result.reasoning).toBe('Multiple retry indicators and explicit mention of time spent');
     });
+
+    it('should preserve errorKeyword when present in LLM response', async () => {
+      jest.spyOn(mockProvider, 'generateCompletion').mockResolvedValue(
+        JSON.stringify({
+          type: 'frustrated',
+          confidence: 0.85,
+          intent: 'Fix build error',
+          context: 'Third retry',
+          errorKeyword: 'Module not found: ./missing-module',
+          reasoning: 'Repeated failure',
+        }),
+      );
+
+      const result = await analyzeFrustration('This module error again!', mockProvider);
+
+      expect(result.errorKeyword).toBe('Module not found: ./missing-module');
+    });
+
+    it('should leave errorKeyword undefined when not present in LLM response', async () => {
+      jest.spyOn(mockProvider, 'generateCompletion').mockResolvedValue(
+        JSON.stringify({
+          type: 'normal',
+          confidence: 0.9,
+          reasoning: 'Standard request',
+        }),
+      );
+
+      const result = await analyzeFrustration('Add a test', mockProvider);
+
+      expect(result.errorKeyword).toBeUndefined();
+    });
   });
 
   // =========================================================================

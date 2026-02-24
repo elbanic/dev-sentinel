@@ -14,8 +14,7 @@
  *   2. Invalid JSON resilience: mixing valid and invalid JSON lines never
  *      causes a crash; invalid lines are silently skipped.
  *   3. Error count bound: the number of errors extracted is at most
- *      the number of tool_results with explicit errors + the number of
- *      tool outputs matching error patterns.
+ *      the number of tool_results with explicit error fields.
  *   4. Message count: parsed messages.length equals the count of
  *      human + assistant entries in the input JSONL.
  */
@@ -117,20 +116,6 @@ const cleanOutputArb = fc.constantFrom(
   'OK',
 );
 
-/** Error patterns that should be detected. */
-const ERROR_PATTERNS = [
-  'Error: something went wrong',
-  'error: compilation failed',
-  'TypeError: undefined is not a function',
-  'SyntaxError: Unexpected token',
-  'ReferenceError: x is not defined',
-  'ENOENT: no such file or directory',
-  'EPERM: operation not permitted',
-];
-
-/** Arbitrary tool output that contains an error pattern. */
-const errorOutputArb = fc.constantFrom(...ERROR_PATTERNS);
-
 /** Arbitrary tool_result with no errors (clean output, null error). */
 const cleanToolResultArb = fc.record({
   name: toolNameArb,
@@ -152,17 +137,6 @@ const errorFieldToolResultArb = fc.record({
   name,
   output,
   error,
-}));
-
-/** Arbitrary tool_result with an error pattern in output (but null error field). */
-const errorPatternToolResultArb = fc.record({
-  name: toolNameArb,
-  output: errorOutputArb,
-}).map(({ name, output }) => ({
-  type: 'tool_result' as const,
-  name,
-  output,
-  error: null,
 }));
 
 /** Arbitrary string that is definitely NOT valid JSON. */
@@ -321,38 +295,27 @@ describe('Property 2: Invalid JSON resilience', () => {
 // ---------------------------------------------------------------------------
 // Property 3: Error count bound
 // ---------------------------------------------------------------------------
-describe('Property 3: Error count is bounded by error sources', () => {
-  it('should extract at most (explicit errors + pattern-matched outputs) errors', () => {
+describe('Property 3: Error count is bounded by explicit error fields', () => {
+  it('should extract at most the number of tool_results with explicit error fields', () => {
     fc.assert(
       fc.property(
-        // Mix of message entries and tool_result entries
-        fc.array(messageEntryArb, { minLength: 0, maxLength: 5 }),
+        fc.array(messageEntryArb, { minLength: 1, maxLength: 5 }),
         fc.array(cleanToolResultArb, { minLength: 0, maxLength: 5 }),
         fc.array(errorFieldToolResultArb, { minLength: 0, maxLength: 3 }),
-        fc.array(errorPatternToolResultArb, { minLength: 0, maxLength: 3 }),
-        (messages, cleanResults, errorFieldResults, errorPatternResults) => {
-          // Combine all entries
+        (messages, cleanResults, errorFieldResults) => {
           const allEntries = [
             ...messages,
             ...cleanResults,
             ...errorFieldResults,
-            ...errorPatternResults,
           ];
 
-          // Skip if no entries at all (would produce null)
-          fc.pre(allEntries.length > 0);
-          // Ensure at least one message entry so we get a non-null result
-          fc.pre(messages.length > 0);
-
-          // Shuffle entries to test order-independence
           const shuffled = [...allEntries].sort(() => Math.random() - 0.5);
           const filePath = writeTmpJsonl(shuffled);
           const result = parseTranscriptFile(filePath);
 
           if (result !== null) {
-            // Upper bound: explicit error fields + pattern-matched outputs
-            const maxErrors = errorFieldResults.length + errorPatternResults.length;
-            expect(result.errors.length).toBeLessThanOrEqual(maxErrors);
+            // Upper bound: only explicit error field count
+            expect(result.errors.length).toBeLessThanOrEqual(errorFieldResults.length);
           }
         },
       ),

@@ -9,6 +9,7 @@
 
 - **Do NOT add Co-Authored-By** line in commit messages
 - Before committing or pushing, ALWAYS review the code to ensure you're not uploading any security-related credentials.
+- **NEVER push if the GitHub repo is public.** Before any `git push`, check repo visibility with `gh repo view --json visibility`. If `"visibility": "PUBLIC"`, REFUSE to push and warn the user. Do NOT push even if the user explicitly requests it — always ask them to make the repo private first.
 
 ## Code Change Approval
 
@@ -30,7 +31,7 @@
 
 ## Project Overview
 
-> **We fail every day, but that failure becomes the success of our next attempt.**
+> **What broke you guards you.**
 
 Dev Sentinel watches Claude Code sessions and does two things:
 1. **Warns** when you're about to repeat a past failure (Active Recall)
@@ -54,7 +55,7 @@ UserPromptSubmit hook:
 
 Stop hook (fires after every Claude response):
   flag status?
-  ├─ 'capture' → parse transcript → create draft → clearFlag()
+  ├─ 'capture' → store full transcript → create draft → clearFlag() (Experience Capture)
   └─ otherwise → skip (stdout: '{"decision":"approve"}')
 
 User (async):
@@ -69,6 +70,7 @@ User (async):
 3. **LLM-only analysis**: No keyword fallback, no state machines. LLM fails → graceful skip
 4. **Local-first**: All data stored locally. Cloud LLM is opt-in
 5. **Graceful degradation**: Every pipeline stage is individually try-caught. Sentinel failure never affects Claude Code
+6. **Full transcript storage**: Stop hook stores the complete session transcript without slicing. Context extraction is deferred to `sentinel review confirm`, where LLM receives the full transcript + frustration metadata to identify the relevant portion.
 
 ---
 

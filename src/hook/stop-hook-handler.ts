@@ -15,7 +15,7 @@ const APPROVE_RESPONSE = '{"decision":"approve"}';
 function findFirstFrustratedTurn(
   sessionId: string,
   sqliteStore: SqliteStore,
-): { prompt: string; intent: string } | null {
+): { prompt: string; intent: string; errorKeyword: string } | null {
   try {
     const turns = sqliteStore.getTurnsBySession(sessionId);
     for (const turn of turns) {
@@ -25,6 +25,7 @@ function findFirstFrustratedTurn(
           return {
             prompt: turn.prompt,
             intent: analysis.intent ? String(analysis.intent).substring(0, 200) : '',
+            errorKeyword: analysis.errorKeyword ? String(analysis.errorKeyword).substring(0, 200) : '',
           };
         }
       } catch {
@@ -38,24 +39,8 @@ function findFirstFrustratedTurn(
 }
 
 /**
- * Slice transcript messages from the first frustrated turn's prompt onward.
- * If the frustrated prompt is not found in messages, returns all messages as fallback.
- */
-function sliceTranscriptFromFrustration(
-  messages: Array<{ role: string; content: string }>,
-  frustratedPrompt: string,
-): Array<{ role: string; content: string }> {
-  const idx = messages.findIndex(
-    (m) => m.role === 'user' && m.content.includes(frustratedPrompt.substring(0, 50)),
-  );
-  if (idx >= 0) {
-    return messages.slice(idx);
-  }
-  return messages;
-}
-
-/**
- * Run the capture pipeline: parse transcript -> slice from frustration point -> store raw candidate (no LLM).
+ * Run the capture pipeline: parse transcript -> store full raw transcript as candidate (no LLM).
+ * Context extraction is deferred to `sentinel review confirm`.
  */
 function runCapturePipeline(
   sessionId: string,
@@ -79,29 +64,17 @@ function runCapturePipeline(
     return;
   }
 
-  // Step 2: Find frustrated turn and slice transcript from that point
+  // Step 2: Find frustrated turn for frustrationSignature (no slicing)
   const frustratedTurn = findFirstFrustratedTurn(sessionId, sqliteStore);
   let errorSummary = '';
-
   if (frustratedTurn) {
-    errorSummary = frustratedTurn.intent;
+    errorSummary = frustratedTurn.errorKeyword || frustratedTurn.intent;
     debugLog(`[stop] frustrated turn found, intent: ${errorSummary}`, sentinelDir);
-
-    // Slice transcript: only keep messages from the frustrated prompt onward
-    const slicedMessages = sliceTranscriptFromFrustration(
-      transcriptData.messages,
-      frustratedTurn.prompt,
-    );
-    debugLog(`[stop] transcript sliced: ${transcriptData.messages.length} → ${slicedMessages.length} msgs`, sentinelDir);
-    transcriptData = {
-      ...transcriptData,
-      messages: slicedMessages,
-    };
   } else {
-    debugLog('[stop] no frustrated turn found, using full transcript', sentinelDir);
+    debugLog('[stop] no frustrated turn found, using empty signature', sentinelDir);
   }
 
-  // Step 3: Dedup check + store candidate with (sliced) raw transcript
+  // Step 3: Dedup check + store candidate with full raw transcript
   try {
     const pendingDrafts = sqliteStore.getPendingDrafts();
     const hasDuplicate = pendingDrafts.some(

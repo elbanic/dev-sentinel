@@ -1611,5 +1611,176 @@ describe('CLI - createProgram', () => {
       expect(experience!.successfulApproach).toBe('LLM fix');
       expect(experience!.lessons).toEqual(['LLM lesson 1']);
     });
+
+    it('should include Frustration Context in LLM content when frustrated turn exists', async () => {
+      // Arrange: store a frustrated turn for the session
+      const sessionId = 'session-ctx-001';
+      sqliteStore.storeTurn(
+        sessionId,
+        'Why does the build keep failing?',
+        JSON.stringify({ type: 'frustrated', confidence: 0.9, intent: 'Fix recurring build failure' }),
+      );
+
+      const transcriptData = {
+        messages: [
+          { role: 'user', content: 'Fix the login' },
+          { role: 'assistant', content: 'Done' },
+          { role: 'user', content: 'Why does the build keep failing?' },
+          { role: 'assistant', content: 'The config is wrong' },
+        ],
+        toolCalls: [],
+        errors: [],
+      };
+      const draft = makeCandidate({
+        id: 'confirm-ctx-001',
+        sessionId,
+        transcriptData: JSON.stringify(transcriptData),
+        frustrationSignature: '',
+        failedApproaches: [],
+        lessons: [],
+      });
+      sqliteStore.storeCandidate(draft);
+
+      // Spy on generateCompletion to capture the content passed
+      const spiedProvider = new MockLLMProvider();
+      const spy = jest.spyOn(spiedProvider, 'generateCompletion').mockResolvedValue(JSON.stringify({
+        frustrationSignature: 'Build failure',
+        failedApproaches: [],
+        successfulApproach: null,
+        lessons: ['Check config'],
+      }));
+
+      // Act
+      await runCommand(['review', 'confirm', 'confirm-ctx-001'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider: spiedProvider,
+      });
+
+      // Assert: the content passed to LLM should include Frustration Context
+      expect(spy).toHaveBeenCalledTimes(1);
+      const contentArg = spy.mock.calls[0][1]; // second argument is the user content
+      expect(contentArg).toContain('\u2500\u2500 Frustration Context \u2500\u2500');
+      expect(contentArg).toContain('Fix recurring build failure');
+      expect(contentArg).toContain('Why does the build keep failing?');
+    });
+  });
+
+  // =========================================================================
+  // 18. review confirm --all / --recent, review reject --all
+  // =========================================================================
+  describe('review confirm --all / --recent, review reject --all', () => {
+    it('should confirm all pending drafts with --all flag', async () => {
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-c-001', sessionId: 's1', frustrationSignature: 'Error A' }));
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-c-002', sessionId: 's2', frustrationSignature: 'Error B' }));
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-c-003', sessionId: 's3', frustrationSignature: 'Error C' }));
+
+      const { output } = await runCommand(['review', 'confirm', '--all'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      expect(sqliteStore.getExperience('all-c-001')).not.toBeNull();
+      expect(sqliteStore.getExperience('all-c-002')).not.toBeNull();
+      expect(sqliteStore.getExperience('all-c-003')).not.toBeNull();
+      expect(sqliteStore.getPendingDrafts()).toHaveLength(0);
+      expect(output).toContain('3');
+    });
+
+    it('should reject all pending drafts with --all flag', async () => {
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-r-001', sessionId: 's1' }));
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-r-002', sessionId: 's2' }));
+
+      const { output } = await runCommand(['review', 'reject', '--all'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      expect(sqliteStore.getPendingDrafts()).toHaveLength(0);
+      expect(sqliteStore.getExperience('all-r-001')).toBeNull();
+      expect(sqliteStore.getExperience('all-r-002')).toBeNull();
+      expect(output).toContain('2');
+    });
+
+    it('should show message when confirm --all has no pending drafts', async () => {
+      const { output } = await runCommand(['review', 'confirm', '--all'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      expect(output.toLowerCase()).toContain('no pending drafts');
+    });
+
+    it('should show message when reject --all has no pending drafts', async () => {
+      const { output } = await runCommand(['review', 'reject', '--all'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      expect(output.toLowerCase()).toContain('no pending drafts');
+    });
+
+    it('should continue confirming remaining drafts when one fails with --all', async () => {
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-f-001', sessionId: 's1' }));
+      sqliteStore.storeCandidate(makeCandidate({ id: 'all-f-002', sessionId: 's2' }));
+
+      let callCount = 0;
+      const spiedProvider = new MockLLMProvider();
+      jest.spyOn(spiedProvider, 'generateEmbedding').mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) throw new Error('Embedding failed');
+        return [0.1, 0.2, 0.3];
+      });
+
+      const { errorOutput } = await runCommand(['review', 'confirm', '--all'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider: spiedProvider,
+      });
+
+      expect(sqliteStore.getExperience('all-f-002')).not.toBeNull();
+      expect(errorOutput).toContain('all-f-001');
+    });
+
+    it('should confirm the most recent draft with --recent flag', async () => {
+      // Arrange: store drafts with different createdAt
+      sqliteStore.storeCandidate(makeCandidate({
+        id: 'recent-001', sessionId: 's1',
+        frustrationSignature: 'Old error',
+        createdAt: '2026-02-20T00:00:00Z',
+      }));
+      sqliteStore.storeCandidate(makeCandidate({
+        id: 'recent-002', sessionId: 's2',
+        frustrationSignature: 'New error',
+        createdAt: '2026-02-23T12:00:00Z',
+      }));
+
+      const { output } = await runCommand(['review', 'confirm', '--recent'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Only the most recent draft should be confirmed
+      expect(sqliteStore.getExperience('recent-002')).not.toBeNull();
+      // The older draft should still be pending
+      expect(sqliteStore.getExperience('recent-001')).toBeNull();
+      expect(sqliteStore.getPendingDrafts()).toHaveLength(1);
+      expect(output).toContain('recent-002');
+    });
+
+    it('should show message when confirm --recent has no pending drafts', async () => {
+      const { output } = await runCommand(['review', 'confirm', '--recent'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      expect(output.toLowerCase()).toContain('no pending drafts');
+    });
   });
 });

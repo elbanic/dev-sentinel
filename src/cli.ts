@@ -310,12 +310,62 @@ export function createProgram(deps: CreateProgramDeps): Command {
       write(SEP);
     });
 
-  // review confirm <id>
+  // review confirm [id] | --all | --recent
   review
-    .command('confirm <id>')
+    .command('confirm [id]')
     .description('Confirm a draft and store as experience')
-    .action(async (id: string) => {
-      // Find the draft among pending drafts
+    .option('--all', 'Confirm all pending drafts')
+    .option('--recent', 'Confirm the most recent pending draft')
+    .action(async (id: string | undefined, opts: { all?: boolean; recent?: boolean }) => {
+      if (opts.all) {
+        const drafts = sqliteStore.getPendingDrafts();
+        if (drafts.length === 0) {
+          write('No pending drafts.\n');
+          return;
+        }
+        let confirmed = 0;
+        for (let i = 0; i < drafts.length; i++) {
+          const draft = drafts[i];
+          write(`[${i + 1}/${drafts.length}] Confirming ${draft.id}...\n`);
+          try {
+            await confirmSingleDraft(draft);
+            confirmed++;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            writeErr(`Error confirming draft "${draft.id}": ${message}\n`);
+          }
+        }
+        write(`Confirmed ${confirmed} of ${drafts.length} draft(s).\n`);
+        return;
+      }
+
+      if (opts.recent) {
+        const drafts = sqliteStore.getPendingDrafts();
+        if (drafts.length === 0) {
+          write('No pending drafts.\n');
+          return;
+        }
+        // Most recent by createdAt
+        const sorted = [...drafts].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+        const draft = sorted[0];
+        try {
+          await confirmSingleDraft(draft);
+          write(`Draft "${draft.id}" confirmed and stored as experience.\n`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          writeErr(`Error confirming draft "${draft.id}": ${message}\n`);
+        }
+        return;
+      }
+
+      if (!id) {
+        writeErr('Usage: sentinel review confirm <id> | --all | --recent\n');
+        return;
+      }
+
+      // Single draft confirm
       const drafts = sqliteStore.getPendingDrafts();
       const draft = drafts.find((d) => d.id === id);
 
@@ -325,60 +375,103 @@ export function createProgram(deps: CreateProgramDeps): Command {
       }
 
       try {
-        // Build content for LLM summarization
-        let content = '';
-        if (draft.transcriptData) {
-          const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-          let frameIdx = 0;
-          const spinner = setInterval(() => {
-            process.stdout.write(`\r${frames[frameIdx++ % frames.length]} Summarizing transcript with LLM...`);
-          }, 80);
-          try {
-            const transcriptData: TranscriptData = JSON.parse(draft.transcriptData);
-            content = buildContextMessage(transcriptData);
-          } catch {
-            // Failed to parse transcript, content stays empty
-          }
-          clearInterval(spinner);
-          if (content) {
-            process.stdout.write('\r✓ Summarization complete.              \n');
-          } else {
-            process.stdout.write('\r⚠ Failed to parse transcript data.     \n');
-          }
-        }
-
-        // confirmExperience handles LLM summarization when content is provided
-        const result = await confirmExperience({
-          id: draft.id,
-          content,
-          frustrationSignature: draft.frustrationSignature,
-          failedApproaches: draft.failedApproaches,
-          successfulApproach: draft.successfulApproach,
-          lessons: draft.lessons,
-          createdAt: draft.createdAt,
-          llmProvider,
-          sqliteStore,
-          vectorStore,
-        });
-
-        sqliteStore.deleteCandidate(draft.id);
-        if (result.stored) {
-          write(`Draft "${id}" confirmed and stored as experience.\n`);
-        } else {
-          write(`Draft "${id}" skipped (duplicate of existing experience).\n`);
-        }
+        await confirmSingleDraft(draft);
+        write(`Draft "${id}" confirmed and stored as experience.\n`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         writeErr(`Error confirming draft "${id}": ${message}\n`);
       }
     });
 
-  // review reject <id>
+  /**
+   * Confirm a single draft: build content, run LLM summarization, store experience.
+   * Throws on failure (caller handles error reporting).
+   */
+  async function confirmSingleDraft(draft: ReturnType<SqliteStore['getPendingDrafts']>[number]): Promise<void> {
+    let content = '';
+    if (draft.transcriptData) {
+      const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+      let frameIdx = 0;
+      const spinner = setInterval(() => {
+        write(`\r${frames[frameIdx++ % frames.length]} Summarizing transcript with LLM...`);
+      }, 80);
+      try {
+        const transcriptData: TranscriptData = JSON.parse(draft.transcriptData);
+
+        // Look up frustration context from session turns
+        let frustrationContext: { prompt: string; intent: string } | undefined;
+        try {
+          const turns = sqliteStore.getTurnsBySession(draft.sessionId);
+          for (const turn of turns) {
+            try {
+              const analysis = JSON.parse(turn.analysis);
+              if (analysis.type === 'frustrated') {
+                frustrationContext = {
+                  prompt: turn.prompt,
+                  intent: analysis.intent ? String(analysis.intent).substring(0, 200) : '',
+                };
+                break;
+              }
+            } catch { /* skip invalid JSON */ }
+          }
+        } catch { /* proceed without context */ }
+
+        content = buildContextMessage(transcriptData, frustrationContext);
+      } catch {
+        // Failed to parse transcript, content stays empty
+      }
+      clearInterval(spinner);
+      if (content) {
+        write('\r✓ Summarization complete.              \n');
+      } else {
+        write('\r⚠ Failed to parse transcript data.     \n');
+      }
+    }
+
+    const result = await confirmExperience({
+      id: draft.id,
+      content,
+      frustrationSignature: draft.frustrationSignature,
+      failedApproaches: draft.failedApproaches,
+      successfulApproach: draft.successfulApproach,
+      lessons: draft.lessons,
+      createdAt: draft.createdAt,
+      llmProvider,
+      sqliteStore,
+      vectorStore,
+    });
+
+    sqliteStore.deleteCandidate(draft.id);
+    if (!result.stored) {
+      write(`Draft "${draft.id}" skipped (duplicate of existing experience).\n`);
+    }
+  }
+
+  // review reject [id] | --all
   review
-    .command('reject <id>')
+    .command('reject [id]')
     .description('Reject and delete a draft')
-    .action((id: string) => {
-      // Find the draft among pending drafts
+    .option('--all', 'Reject all pending drafts')
+    .action((id: string | undefined, opts: { all?: boolean }) => {
+      if (opts.all) {
+        const drafts = sqliteStore.getPendingDrafts();
+        if (drafts.length === 0) {
+          write('No pending drafts.\n');
+          return;
+        }
+        for (const draft of drafts) {
+          sqliteStore.deleteCandidate(draft.id);
+        }
+        write(`Rejected ${drafts.length} draft(s).\n`);
+        return;
+      }
+
+      if (!id) {
+        writeErr('Usage: sentinel review reject <id> | --all\n');
+        return;
+      }
+
+      // Single draft reject
       const drafts = sqliteStore.getPendingDrafts();
       const draft = drafts.find((d) => d.id === id);
 
@@ -441,7 +534,7 @@ export function createProgram(deps: CreateProgramDeps): Command {
         const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         let frameIdx = 0;
         const spinner = setInterval(() => {
-          process.stdout.write(`\r${frames[frameIdx++ % frames.length]} Analyzing: ${basename}`);
+          write(`\r${frames[frameIdx++ % frames.length]} Analyzing: ${basename}`);
         }, 80);
 
         try {
@@ -459,7 +552,7 @@ export function createProgram(deps: CreateProgramDeps): Command {
             vectorStore,
           });
           // Clear spinner line
-          process.stdout.write('\r' + ' '.repeat(40) + '\r');
+          write('\r' + ' '.repeat(40) + '\r');
           if (result.stored) {
             addedCount++;
             write(`✓ Added: ${basename}\n`);
@@ -468,7 +561,7 @@ export function createProgram(deps: CreateProgramDeps): Command {
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          process.stdout.write('\r' + ' '.repeat(40) + '\r');
+          write('\r' + ' '.repeat(40) + '\r');
           writeErr(`✗ Failed: ${basename}: ${message}\n`);
         } finally {
           clearInterval(spinner);

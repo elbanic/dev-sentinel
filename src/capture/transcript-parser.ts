@@ -1,9 +1,6 @@
 import * as fs from 'fs';
 import type { TranscriptData, TranscriptMessage, ToolCallEntry } from '../types/index';
 
-// Error patterns detected in tool output strings
-const ERROR_PATTERNS = /Error:|error:|TypeError|SyntaxError|ReferenceError|ENOENT|EPERM/;
-
 /**
  * Parse a Claude Code JSONL transcript file into structured TranscriptData.
  *
@@ -120,18 +117,13 @@ export function parseTranscriptFile(filePath: string): TranscriptData | null {
               existing.error = parsed.error;
             }
           }
-          // Orphan tool_result (no matching tool_use): don't add to toolCalls,
-          // but still detect errors below
+          // Orphan tool_result (no matching tool_use): don't add to toolCalls
 
           // Add explicit error field to errors array if non-null and non-empty
           if (typeof parsed.error === 'string' && parsed.error.length > 0) {
             errors.push(parsed.error);
           }
 
-          // Check output for error patterns
-          if (typeof parsed.output === 'string' && ERROR_PATTERNS.test(parsed.output)) {
-            errors.push(parsed.output);
-          }
           break;
         }
 
@@ -282,12 +274,7 @@ function extractToolResultsFromContent(
             existing.output = output;
           }
         }
-        // Orphan tool_result: don't add to toolCalls, but still detect errors
-
-        // Check output for error patterns
-        if (output && ERROR_PATTERNS.test(output)) {
-          errors.push(output);
-        }
+        // Orphan tool_result: don't add to toolCalls
       }
     }
   }
