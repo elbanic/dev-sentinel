@@ -17,18 +17,21 @@ const FALLBACK: FrustrationAnalysis = {
  * - Makes exactly ONE call to llmProvider.generateCompletion
  * - Parses the response as JSON (handles markdown fences)
  * - Validates with Zod
- * - On ANY failure: returns the fallback (never throws)
+ * - On LLM error (generateCompletion throws): throws (bubble up to handler)
+ * - On parse/validation failure: returns the fallback
  */
 export async function analyzeFrustration(
   prompt: string,
   llmProvider: LLMProvider,
 ): Promise<FrustrationAnalysis> {
-  try {
-    const raw = await llmProvider.generateCompletion(
-      PROMPTS.frustrationAnalysis,
-      prompt,
-    );
+  // LLM call — errors bubble up to the caller (handler records them)
+  const raw = await llmProvider.generateCompletion(
+    PROMPTS.frustrationAnalysis,
+    prompt,
+  );
 
+  // Parse/validate — errors are graceful fallback
+  try {
     const parsed = parseLLMJson(stripThinkBlock(raw));
     if (!parsed) return FALLBACK;
 

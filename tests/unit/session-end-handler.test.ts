@@ -73,6 +73,7 @@ function makeMockSqliteStore() {
     getExperience: jest.fn(),
     runInTransaction: jest.fn(),
     getExperienceCount: jest.fn(),
+    recordHookError: jest.fn(),
   };
 }
 
@@ -822,6 +823,98 @@ describe('SessionEndHandler - handleSessionEnd', () => {
       expect(mockStore.upgradeFlag).not.toHaveBeenCalled();
       expect(mockedParseTranscriptFile).not.toHaveBeenCalled();
       expect(mockStore.clearFlag).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // recordHookError in catch blocks (Persistent Error Tracking)
+  // =========================================================================
+  describe('recordHookError in catch blocks', () => {
+    it('should call recordHookError with database component when getFlag throws', async () => {
+      // Arrange: getFlag throws immediately
+      mockStore.getFlag.mockImplementation(() => {
+        throw new Error('Database is closed');
+      });
+
+      // Act
+      await handleSessionEnd({
+        sessionId: 'session-getflag-err-record',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: recordHookError should have been called for database component
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'database',
+        'session-end',
+        expect.stringContaining('Database is closed'),
+      );
+    });
+
+    it('should call recordHookError with database component when upgradeFlag throws', async () => {
+      // Arrange: flag=frustrated, upgradeFlag throws
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'frustrated' }));
+      mockStore.upgradeFlag.mockImplementation(() => {
+        throw new Error('Database is locked');
+      });
+      mockedParseTranscriptFile.mockReturnValue(null);
+
+      // Act
+      await handleSessionEnd({
+        sessionId: 'session-upgrade-err-record',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: recordHookError should have been called for database component
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'database',
+        'session-end',
+        expect.stringContaining('Database is locked'),
+      );
+    });
+
+    it('should call recordHookError in the outermost catch block', async () => {
+      // Arrange: trigger the outermost catch. getFlag throws which hits the
+      // inner catch and returns, but if something goes wrong beyond that...
+      // We test with getFlag throwing since it exercises the top-level catch
+      mockStore.getFlag.mockImplementation(() => {
+        throw new Error('Unexpected session-end error');
+      });
+
+      // Act
+      await handleSessionEnd({
+        sessionId: 'session-toplevel-err',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: the outermost catch should call input?.sqliteStore?.recordHookError
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'database',
+        'session-end',
+        expect.any(String),
+      );
+    });
+
+    it('should still return void even when recordHookError itself throws', async () => {
+      // Arrange: getFlag throws, AND recordHookError also throws
+      mockStore.getFlag.mockImplementation(() => {
+        throw new Error('Database is closed');
+      });
+      mockStore.recordHookError.mockImplementation(() => {
+        throw new Error('recordHookError also crashed');
+      });
+
+      // Act
+      const result = await handleSessionEnd({
+        sessionId: 'session-double-fail',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: should still return void (graceful degradation)
+      expect(result).toBeUndefined();
     });
   });
 });

@@ -13,7 +13,7 @@
  *   4. Always return '{"decision":"approve"}'
  *   5. NEVER throw
  *
- * Test points (11 + 3 = 14 total):
+ * Test points (11 + 3 + 4 = 18 total):
  *   1.  flag absent -> approve immediately, parseTranscriptFile NOT called
  *   2.  flag = 'frustrated' -> approve immediately, parseTranscriptFile NOT called
  *   3.  flag = 'capture' -> full pipeline -> approve (raw transcript stored)
@@ -28,6 +28,10 @@
  *   12. matchedExperienceId tagging: flag has matched_experience_id -> included in storeCandidate
  *   13. matchedExperienceId tagging: flag has no matched_experience_id -> not included
  *   14. matchedExperienceId tagging: flag matched_experience_id is null -> not included
+ *   15. parseTranscript error -> recordHookError called with ('transcript', 'stop', ...)
+ *   16. storeCandidate error -> recordHookError called with ('database', 'stop', ...)
+ *   17. getFlag error -> recordHookError called with ('database', 'stop', ...)
+ *   18. top-level catch -> recordHookError called with ('database', 'stop', ...)
  */
 
 import { handleStop } from '../../src/hook/stop-hook-handler';
@@ -68,6 +72,7 @@ function makeMockSqliteStore() {
     storeCandidate: jest.fn(),
     getPendingDrafts: jest.fn().mockReturnValue([]),
     getTurnsBySession: jest.fn().mockReturnValue([]),
+    recordHookError: jest.fn(),
     // Other methods not used by handleStop but included for type completeness
     initialize: jest.fn(),
     close: jest.fn(),
@@ -1045,6 +1050,126 @@ describe('StopHookHandler - handleStop', () => {
       expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
       const storedArg = mockStore.storeCandidate.mock.calls[0][0];
       expect(storedArg.matchedExperienceId).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // recordHookError verification (NEW — Persistent Error Tracking)
+  // =========================================================================
+  describe('recordHookError in catch blocks', () => {
+    it('should call recordHookError with transcript component when parseTranscriptFile throws', async () => {
+      // Arrange: flag=capture, parseTranscriptFile throws
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'capture' }));
+      mockedParseTranscriptFile.mockImplementation(() => {
+        throw new Error('EACCES: permission denied');
+      });
+
+      // Act
+      await handleStop({
+        sessionId: 'session-parse-err-record',
+        transcriptPath: '/tmp/unreadable.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: recordHookError should have been called for transcript component
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'transcript',
+        'stop',
+        expect.stringContaining('EACCES'),
+      );
+    });
+
+    it('should call recordHookError with database component when storeCandidate throws', async () => {
+      // Arrange: flag=capture, valid transcript, storeCandidate throws
+      const transcriptData = makeTranscriptData();
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'capture' }));
+      mockedParseTranscriptFile.mockReturnValue(transcriptData);
+      mockStore.getPendingDrafts.mockReturnValue([]);
+      mockStore.storeCandidate.mockImplementation(() => {
+        throw new Error('SQLITE_FULL: database disk image is full');
+      });
+
+      // Act
+      await handleStop({
+        sessionId: 'session-store-err-record',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: recordHookError should have been called for database component
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'database',
+        'stop',
+        expect.stringContaining('SQLITE_FULL'),
+      );
+    });
+
+    it('should call recordHookError with database component when getFlag throws', async () => {
+      // Arrange: getFlag throws immediately
+      mockStore.getFlag.mockImplementation(() => {
+        throw new Error('Database is closed');
+      });
+
+      // Act
+      await handleStop({
+        sessionId: 'session-getflag-err-record',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: recordHookError should have been called for database component
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'database',
+        'stop',
+        expect.stringContaining('Database is closed'),
+      );
+    });
+
+    it('should call recordHookError in the outermost catch block', async () => {
+      // Arrange: trigger the outermost catch by making getFlag throw AND
+      // ensuring sqliteStore?.recordHookError is accessible
+      mockStore.getFlag.mockImplementation(() => {
+        throw new Error('Unexpected top-level failure');
+      });
+
+      // Act
+      await handleStop({
+        sessionId: 'session-toplevel-err',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: the outermost catch should call input?.sqliteStore?.recordHookError
+      expect(mockStore.recordHookError).toHaveBeenCalledWith(
+        'database',
+        'stop',
+        expect.any(String),
+      );
+    });
+
+    it('should still return approve even when recordHookError itself throws', async () => {
+      // Arrange: getFlag throws, AND recordHookError also throws
+      mockStore.getFlag.mockImplementation(() => {
+        throw new Error('Database is closed');
+      });
+      mockStore.recordHookError.mockImplementation(() => {
+        throw new Error('recordHookError also crashed');
+      });
+
+      // Act
+      const result = await handleStop({
+        sessionId: 'session-double-fail',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      // Assert: should still return approve (graceful degradation)
+      expect(result).toBe(APPROVE_RESPONSE);
     });
   });
 });

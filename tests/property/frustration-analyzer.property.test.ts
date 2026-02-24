@@ -66,7 +66,7 @@ describe('Property 1: analyzeFrustration is a total function (never throws)', ()
     );
   });
 
-  it('should always resolve for any arbitrary string prompt with a failing MockLLMProvider', async () => {
+  it('should always throw for any arbitrary string prompt with a failing MockLLMProvider', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.string({ minLength: 0, maxLength: 1000 }),
@@ -74,9 +74,8 @@ describe('Property 1: analyzeFrustration is a total function (never throws)', ()
           // Arrange: provider that always throws
           const provider = new MockLLMProvider({ shouldFail: true });
 
-          // Act & Assert: must resolve
-          const result = await analyzeFrustration(prompt, provider);
-          expect(result).toBeDefined();
+          // Act & Assert: LLM errors bubble up (handler catches them)
+          await expect(analyzeFrustration(prompt, provider)).rejects.toThrow();
         },
       ),
       { numRuns: 100 },
@@ -244,17 +243,15 @@ describe('Property 4: Result always conforms to FrustrationAnalysisSchema', () =
     );
   });
 
-  it('should always produce a result that passes Zod safeParse (error path)', async () => {
+  it('should throw when LLM provider fails (error path)', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.string({ minLength: 0, maxLength: 500 }),
         async (prompt) => {
           const provider = new MockLLMProvider({ shouldFail: true });
 
-          const result = await analyzeFrustration(prompt, provider);
-
-          const parseResult = FrustrationAnalysisSchema.safeParse(result);
-          expect(parseResult.success).toBe(true);
+          // LLM errors bubble up to the caller
+          await expect(analyzeFrustration(prompt, provider)).rejects.toThrow();
         },
       ),
       { numRuns: 100 },
@@ -286,17 +283,15 @@ describe('Property 4: Result always conforms to FrustrationAnalysisSchema', () =
 // ---------------------------------------------------------------------------
 // Property 5: Deterministic fallback on provider failure
 // ---------------------------------------------------------------------------
-describe('Property 5: Deterministic fallback when LLM always fails', () => {
-  it('should always return the exact fallback result when the provider throws', async () => {
+describe('Property 5: LLM failure always throws (bubble up to handler)', () => {
+  it('should always throw when the provider fails', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.string({ minLength: 0, maxLength: 500 }),
         async (prompt) => {
           const provider = new MockLLMProvider({ shouldFail: true });
 
-          const result = await analyzeFrustration(prompt, provider);
-
-          expect(result).toEqual(FALLBACK_RESULT);
+          await expect(analyzeFrustration(prompt, provider)).rejects.toThrow();
         },
       ),
       { numRuns: 100 },

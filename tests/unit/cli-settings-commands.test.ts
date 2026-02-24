@@ -6,6 +6,7 @@
  *   2. `sentinel enable` — CLI integration (from cli-enable-disable.test.ts)
  *   3. `sentinel disable` — CLI integration (from cli-enable-disable.test.ts)
  *   4. `sentinel status` — enabled/disabled display (from cli-enable-disable.test.ts)
+ *   5. `sentinel status` — persistent error warnings (NEW)
  *
  * Testing strategy:
  *   - Uses shared helpers from cli-test-helpers (runCommand, makeCandidate, etc.)
@@ -514,5 +515,106 @@ describe('CLI - sentinel status with enabled/disabled display', () => {
     expect(lower).toMatch(/enabled/);
     expect(output).toContain('1'); // experience count
     expect(lower).toMatch(/experience|draft/); // descriptive label
+  });
+});
+
+// ===========================================================================
+// 5. sentinel status — persistent error warnings
+//
+// These tests use (sqliteStore as any) to call recordHookError, which does not
+// exist on SqliteStore yet. This allows the test FILE to compile so existing
+// tests above are not broken, while the new tests themselves fail at runtime
+// (RED phase).
+// ===========================================================================
+describe('status - persistent error warnings', () => {
+  let sqliteStore: SqliteStore;
+  let vectorStore: VectorStore;
+  let llmProvider: MockLLMProvider;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tempDir = createTempDir();
+
+    const deps = createTestDeps();
+    sqliteStore = deps.sqliteStore;
+    vectorStore = deps.vectorStore;
+    llmProvider = deps.llmProvider;
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    cleanupDeps({ sqliteStore, vectorStore, llmProvider });
+  });
+
+  it('should NOT display warnings when no persistent errors exist', async () => {
+    // Arrange: empty DB, no errors recorded
+    writeSettings({
+      enabled: true,
+      llm: { provider: 'ollama', ollama: {} },
+      storage: {},
+    });
+
+    // Act
+    const { output } = await runCommand(['status'], {
+      sqliteStore,
+      vectorStore,
+      llmProvider,
+      configDir: tempDir,
+    });
+
+    // Assert: output should NOT contain 'Warning'
+    expect(output).not.toMatch(/Warning/i);
+  });
+
+  it('should display warning when persistent errors exist for a component', async () => {
+    // Arrange: record 5 errors for 'llm' to exceed threshold
+    // Cast to any since recordHookError does not exist yet on SqliteStore
+    writeSettings({
+      enabled: true,
+      llm: { provider: 'ollama', ollama: {} },
+      storage: {},
+    });
+    const store = sqliteStore as any;
+    store.recordHookError('llm', 'user-prompt-submit', 'connection refused at localhost:11434');
+    store.recordHookError('llm', 'user-prompt-submit', 'connection refused at localhost:11434');
+    store.recordHookError('llm', 'user-prompt-submit', 'connection refused at localhost:11434');
+    store.recordHookError('llm', 'user-prompt-submit', 'connection refused at localhost:11434');
+    store.recordHookError('llm', 'user-prompt-submit', 'connection refused at localhost:11434');
+
+    // Act
+    const { output } = await runCommand(['status'], {
+      sqliteStore,
+      vectorStore,
+      llmProvider,
+      configDir: tempDir,
+    });
+
+    // Assert: output should contain warning with component name and error detail
+    expect(output).toMatch(/Warning/i);
+    expect(output).toMatch(/LLM provider/i);
+    expect(output).toContain('connection refused');
+  });
+
+  it('should not crash when there are zero errors (exit code should be clean)', async () => {
+    // Arrange: no errors, just an empty DB with valid settings
+    writeSettings({
+      enabled: true,
+      llm: { provider: 'ollama', ollama: {} },
+      storage: {},
+    });
+
+    // Act
+    const { output, exitCode } = await runCommand(['status'], {
+      sqliteStore,
+      vectorStore,
+      llmProvider,
+      configDir: tempDir,
+    });
+
+    // Assert: should succeed with clean exit
+    // exitCode is undefined (no error thrown) or 0
+    expect(exitCode === undefined || exitCode === 0).toBe(true);
+    // Should still display basic status info
+    expect(output.length).toBeGreaterThan(0);
   });
 });

@@ -57,6 +57,7 @@ export function runCapturePipeline(
     debugLog(`[stop] parseTranscript: ${transcriptData ? `${transcriptData.messages.length} msgs` : 'null'}`, sentinelDir);
   } catch (e) {
     debugLog(`[stop] parseTranscript error: ${e}`, sentinelDir);
+    try { sqliteStore.recordHookError('transcript', 'stop', String(e)); } catch { /* ignore */ }
     return;
   }
 
@@ -102,6 +103,7 @@ export function runCapturePipeline(
     debugLog(`[stop] storeCandidate: ${candidateId} (raw transcript, ${transcriptData.messages.length} msgs)`, sentinelDir);
   } catch (e) {
     debugLog(`[stop] storeCandidate error: ${e}`, sentinelDir);
+    try { sqliteStore.recordHookError('database', 'stop', String(e)); } catch { /* ignore */ }
   }
 }
 
@@ -141,7 +143,8 @@ export async function handleStop(input: {
     let flag: ReturnType<SqliteStore['getFlag']>;
     try {
       flag = sqliteStore.getFlag(sessionId);
-    } catch {
+    } catch (e) {
+      try { sqliteStore.recordHookError('database', 'stop', String(e)); } catch { /* ignore */ }
       return APPROVE_RESPONSE;
     }
 
@@ -158,7 +161,8 @@ export async function handleStop(input: {
     }
 
     return APPROVE_RESPONSE;
-  } catch {
+  } catch (e) {
+    try { input?.sqliteStore?.recordHookError('database', 'stop', String(e)); } catch { /* ignore */ }
     return APPROVE_RESPONSE;
   }
 }

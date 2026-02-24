@@ -32,6 +32,7 @@ export async function handleSessionEnd(input: {
       flag = sqliteStore.getFlag(sessionId);
     } catch (e) {
       debugLog(`[session-end] getFlag error: ${e}`, sentinelDir);
+      try { sqliteStore.recordHookError('database', 'session-end', String(e)); } catch { /* ignore */ }
       return;
     }
 
@@ -47,6 +48,7 @@ export async function handleSessionEnd(input: {
       debugLog(`[session-end] upgraded flag to capture for ${sessionId}`, sentinelDir);
     } catch (e) {
       debugLog(`[session-end] upgradeFlag error (continuing): ${e}`, sentinelDir);
+      try { sqliteStore.recordHookError('database', 'session-end', String(e)); } catch { /* ignore */ }
     }
 
     try {
@@ -54,7 +56,8 @@ export async function handleSessionEnd(input: {
     } finally {
       safeClearFlag(sqliteStore, sessionId);
     }
-  } catch {
+  } catch (e) {
+    try { input?.sqliteStore?.recordHookError('database', 'session-end', String(e)); } catch { /* ignore */ }
     // Never throw - SessionEnd errors are silently ignored
   }
 }

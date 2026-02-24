@@ -11,15 +11,15 @@
  *   2. Parses the LLM response as JSON (handling markdown fences like ```json ... ```)
  *   3. Validates with FrustrationAnalysisSchema (Zod safeParse)
  *   4. Returns the parsed FrustrationAnalysis object
- *   5. On ANY failure (invalid JSON, Zod validation fail, LLM error):
+ *   5. On parse/validation failure (invalid JSON, Zod validation fail):
  *      returns fallback { type: 'normal', confidence: 0, reasoning: '' }
- *   6. Never throws
+ *   6. On LLM error (generateCompletion throws): throws (bubble up to handler)
  *
  * Test categories:
  *   1. Valid JSON response -> correct parsing
  *   2. Markdown-fenced JSON -> strip fence then parse
  *   3. Invalid JSON -> fallback
- *   4. LLM throws error -> fallback
+ *   4. LLM throws error -> throws (bubble up)
  *   5. Zod validation failure (missing/invalid fields) -> fallback
  *   6. System prompt verification
  *   7. User prompt passthrough verification
@@ -340,50 +340,49 @@ describe('FrustrationAnalyzer - analyzeFrustration', () => {
   });
 
   // =========================================================================
-  // 4. LLM throws error -> fallback
+  // 4. LLM throws error -> throws (bubble up to handler)
   // =========================================================================
-  describe('LLM provider throws error -> fallback', () => {
-    it('should return fallback when generateCompletion throws', async () => {
+  describe('LLM provider throws error -> throws (bubble up)', () => {
+    it('should throw when generateCompletion throws', async () => {
       // Arrange
       const failProvider = new MockLLMProvider({ shouldFail: true });
 
-      // Act
-      const result = await analyzeFrustration('Any prompt', failProvider);
-
-      // Assert
-      expect(result).toEqual(FALLBACK_RESULT);
-    });
-
-    it('should never throw even when the LLM provider throws', async () => {
-      // Arrange
-      const failProvider = new MockLLMProvider({ shouldFail: true });
-
-      // Act & Assert: must resolve, never reject
+      // Act & Assert: LLM errors bubble up to the caller (handler catches them)
       await expect(
         analyzeFrustration('Any prompt', failProvider),
-      ).resolves.toBeDefined();
+      ).rejects.toThrow();
     });
 
-    it('should return fallback when generateCompletion rejects with a non-Error value', async () => {
+    it('should propagate the original error from generateCompletion', async () => {
+      // Arrange
+      jest.spyOn(mockProvider, 'generateCompletion').mockRejectedValue(
+        new Error('Connection refused at localhost:11434'),
+      );
+
+      // Act & Assert
+      await expect(
+        analyzeFrustration('prompt', mockProvider),
+      ).rejects.toThrow('Connection refused at localhost:11434');
+    });
+
+    it('should throw when generateCompletion rejects with a non-Error value', async () => {
       // Arrange
       jest.spyOn(mockProvider, 'generateCompletion').mockRejectedValue('string error');
 
-      // Act
-      const result = await analyzeFrustration('prompt', mockProvider);
-
-      // Assert
-      expect(result).toEqual(FALLBACK_RESULT);
+      // Act & Assert
+      await expect(
+        analyzeFrustration('prompt', mockProvider),
+      ).rejects.toBe('string error');
     });
 
-    it('should return fallback when generateCompletion rejects with null', async () => {
+    it('should throw when generateCompletion rejects with null', async () => {
       // Arrange
       jest.spyOn(mockProvider, 'generateCompletion').mockRejectedValue(null);
 
-      // Act
-      const result = await analyzeFrustration('prompt', mockProvider);
-
-      // Assert
-      expect(result).toEqual(FALLBACK_RESULT);
+      // Act & Assert
+      await expect(
+        analyzeFrustration('prompt', mockProvider),
+      ).rejects.toBeNull();
     });
   });
 

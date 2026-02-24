@@ -25,6 +25,25 @@ export function registerSettingsCommands(program: Command, deps: CreateProgramDe
       const pendingDrafts = sqliteStore.getPendingDrafts();
       write(`Experiences: ${experienceCount}\n`);
       write(`Pending drafts: ${pendingDrafts.length}\n`);
+
+      // Display persistent error warnings (best effort)
+      try {
+        sqliteStore.cleanupOldErrors(7);
+      } catch { /* ignore cleanup errors */ }
+      try {
+        const persistentErrors = sqliteStore.getPersistentErrors(1, 3);
+        if (persistentErrors.length > 0) {
+          write('\n');
+          for (const err of persistentErrors) {
+            const label = err.component === 'llm'
+              ? `LLM provider (${settings.llm.provider})`
+              : err.component;
+            write(`Warning: ${label} has failed ${err.count} times in the last hour\n`);
+            write(`  Last error: ${err.lastError}\n`);
+          }
+          write('  Run `sentinel debug --tail` for details\n');
+        }
+      } catch { /* ignore - status should always work */ }
     });
 
   // ---- enable command ----

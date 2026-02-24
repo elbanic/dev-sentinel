@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { AutoMemoryCandidate, ExperienceRevision, FailureExperience } from '../types/index';
+import type { AutoMemoryCandidate, ExperienceRevision, FailureExperience, HookErrorComponent, PersistentErrorSummary } from '../types/index';
 
 // Row types returned by better-sqlite3 queries
 interface TurnRow {
@@ -50,6 +50,13 @@ interface ExperienceRevisionRow {
   successful_approach: string | null;
   lessons: string; // JSON
   created_at: string;
+}
+
+interface HookErrorRow {
+  component: string;
+  count: number;
+  last_error: string;
+  last_occurred: string;
 }
 
 export class SqliteStore {
@@ -146,6 +153,19 @@ export class SqliteStore {
         lessons TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+    `);
+
+    // Create hook_errors table for persistent error tracking
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS hook_errors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        component TEXT NOT NULL,
+        hook TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_hook_errors_component_created
+        ON hook_errors(component, created_at);
     `);
   }
 
@@ -386,6 +406,52 @@ export class SqliteStore {
     return rows.map((row) => this.revisionRowToModel(row));
   }
 
+  // =========================================================================
+  // hook_errors
+  // =========================================================================
+
+  recordHookError(component: HookErrorComponent, hook: string, errorMessage: string, createdAt?: string): void {
+    this.ensureOpen();
+    if (createdAt) {
+      this.db
+        .prepare('INSERT INTO hook_errors (component, hook, error_message, created_at) VALUES (?, ?, ?, ?)')
+        .run(component, hook, errorMessage, createdAt);
+    } else {
+      this.db
+        .prepare('INSERT INTO hook_errors (component, hook, error_message) VALUES (?, ?, ?)')
+        .run(component, hook, errorMessage);
+    }
+  }
+
+  getPersistentErrors(windowHours: number = 1, threshold: number = 3): PersistentErrorSummary[] {
+    this.ensureOpen();
+    const rows = this.db
+      .prepare(`
+        SELECT component, cnt as count, error_message as last_error, created_at as last_occurred
+        FROM (
+          SELECT *, COUNT(*) OVER (PARTITION BY component) as cnt,
+            ROW_NUMBER() OVER (PARTITION BY component ORDER BY created_at DESC) as rn
+          FROM hook_errors WHERE created_at >= datetime('now', '-' || ? || ' hours')
+        ) WHERE rn = 1 AND cnt >= ?
+      `)
+      .all(windowHours, threshold) as HookErrorRow[];
+
+    return rows.map((row) => ({
+      component: row.component as PersistentErrorSummary['component'],
+      count: row.count,
+      lastError: row.last_error,
+      lastOccurred: row.last_occurred,
+    }));
+  }
+
+  cleanupOldErrors(retentionDays: number = 7): number {
+    this.ensureOpen();
+    const result = this.db
+      .prepare("DELETE FROM hook_errors WHERE created_at < datetime('now', '-' || ? || ' days')")
+      .run(retentionDays);
+    return result.changes;
+  }
+
   resetAll(): void {
     this.ensureOpen();
     this.db.exec('DELETE FROM experiences');
@@ -394,6 +460,7 @@ export class SqliteStore {
     this.db.exec('DELETE FROM session_turns');
     this.db.exec('DELETE FROM session_advices');
     this.db.exec('DELETE FROM experience_revisions');
+    this.db.exec('DELETE FROM hook_errors');
   }
 
   // =========================================================================

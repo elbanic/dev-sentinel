@@ -171,3 +171,15 @@ export interface LLMProvider {
   generateEmbedding(text: string): Promise<number[]>;
   isAvailable(): Promise<boolean>;
 }
+
+// ---------------------------------------------------------------------------
+// 10. Persistent Error Tracking
+// ---------------------------------------------------------------------------
+export type HookErrorComponent = 'llm' | 'database' | 'vector' | 'transcript';
+
+export interface PersistentErrorSummary {
+  component: HookErrorComponent;
+  count: number;
+  lastError: string;
+  lastOccurred: string;
+}

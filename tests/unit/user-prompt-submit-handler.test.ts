@@ -149,6 +149,7 @@ function createMockSqliteStore(): jest.Mocked<Pick<SqliteStore,
     getExperience: jest.fn().mockReturnValue(null),
     getAdvisedExperienceIds: jest.fn().mockReturnValue([]),
     recordAdvice: jest.fn(),
+    recordHookError: jest.fn(),
     initialize: jest.fn(),
     close: jest.fn(),
     runInTransaction: jest.fn(),
@@ -1493,6 +1494,75 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
       });
 
       // Assert
+      expect(result).toBe('{}');
+    });
+  });
+
+  // =========================================================================
+  // recordHookError in catch blocks (Persistent Error Tracking)
+  // =========================================================================
+  describe('recordHookError in catch blocks', () => {
+    it('should call recordHookError with vector component when searchMemory throws', async () => {
+      // Arrange: frustrated prompt triggers searchMemory, which throws
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'frustrated', confidence: 0.9 }));
+      mockedSearchMemory.mockRejectedValue(new Error('Embedding service unavailable'));
+      (mockSqliteStore.getAdvisedExperienceIds as jest.Mock).mockReturnValue([]);
+
+      // Act
+      await handleUserPromptSubmit({
+        prompt: 'This error keeps happening with the build',
+        sessionId: 'session-search-err',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      // Assert: recordHookError should have been called for vector component
+      expect((mockSqliteStore as any).recordHookError).toHaveBeenCalledWith(
+        'vector',
+        'user-prompt-submit',
+        expect.stringContaining('Embedding service unavailable'),
+      );
+    });
+
+    it('should call recordHookError with llm component when the outermost catch triggers', async () => {
+      // Arrange: make analyzeFrustration throw to trigger the top-level catch
+      mockedAnalyzeFrustration.mockRejectedValue(new Error('LLM connection timeout'));
+
+      // Act
+      await handleUserPromptSubmit({
+        prompt: 'Something is broken',
+        sessionId: 'session-toplevel-err',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      // Assert: the top-level catch should call recordHookError
+      expect((mockSqliteStore as any).recordHookError).toHaveBeenCalledWith(
+        'llm',
+        'user-prompt-submit',
+        expect.stringContaining('LLM connection timeout'),
+      );
+    });
+
+    it('should still return {} even when recordHookError itself throws', async () => {
+      // Arrange: both analyzeFrustration and recordHookError throw
+      mockedAnalyzeFrustration.mockRejectedValue(new Error('LLM down'));
+      ((mockSqliteStore as any).recordHookError as jest.Mock).mockImplementation(() => {
+        throw new Error('recordHookError also failed');
+      });
+
+      // Act
+      const result = await handleUserPromptSubmit({
+        prompt: 'Double failure scenario',
+        sessionId: 'session-double-fail',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      // Assert: should still return empty JSON (graceful degradation)
       expect(result).toBe('{}');
     });
   });

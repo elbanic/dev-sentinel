@@ -75,6 +75,7 @@ export async function handleUserPromptSubmit(input: {
           }
         } catch (e) {
           debugLog(`[ups] searchMemory error: ${e}`, sentinelDir);
+          try { sqliteStore.recordHookError('vector', 'user-prompt-submit', String(e)); } catch { /* ignore */ }
         }
       }
 
@@ -112,7 +113,8 @@ export async function handleUserPromptSubmit(input: {
     }
 
     return EMPTY_RESPONSE;
-  } catch {
+  } catch (e) {
+    try { input?.sqliteStore?.recordHookError('llm', 'user-prompt-submit', String(e)); } catch { /* ignore */ }
     // Never throw - return '{}' on any error
     return EMPTY_RESPONSE;
   }
