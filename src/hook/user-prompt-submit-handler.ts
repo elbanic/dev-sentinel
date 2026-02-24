@@ -54,8 +54,7 @@ export async function handleUserPromptSubmit(input: {
     debugLog(`[ups] model=${llmProvider.getModelName()}, ${analysis.type}(${analysis.confidence}), threshold=${threshold}`, sentinelDir);
 
     if (analysis.type === 'frustrated' && analysis.confidence >= threshold) {
-      // Set the flag BEFORE searchMemory
-      sqliteStore.setFlag(sessionId, 'frustrated');
+      let matchedExperienceId: string | undefined;
 
       // Get already-advised experience IDs for this session
       const advisedIds = sqliteStore.getAdvisedExperienceIds(sessionId);
@@ -70,6 +69,7 @@ export async function handleUserPromptSubmit(input: {
           debugLog(`[ups] searchMemory: ${match ? `confidence=${match.confidence}, action=${match.suggestedAction?.substring(0, 80)}` : 'null'}`, sentinelDir);
 
           if (match) {
+            matchedExperienceId = match.experience.id;
             sqliteStore.recordAdvice(sessionId, match.experience.id);
             messageParts.push(formatWarning(match));
           }
@@ -77,6 +77,9 @@ export async function handleUserPromptSubmit(input: {
           debugLog(`[ups] searchMemory error: ${e}`, sentinelDir);
         }
       }
+
+      // setFlag AFTER searchMemory so we have matchedExperienceId
+      sqliteStore.setFlag(sessionId, 'frustrated', matchedExperienceId);
     } else if (analysis.type === 'resolution' || analysis.type === 'abandonment') {
       // Check if there is an existing frustrated flag
       const flag = sqliteStore.getFlag(sessionId);

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { AutoMemoryCandidate, FailureExperience } from '../types/index';
+import type { AutoMemoryCandidate, ExperienceRevision, FailureExperience } from '../types/index';
 
 // Row types returned by better-sqlite3 queries
 interface TurnRow {
@@ -15,6 +15,7 @@ interface FlagRow {
   status: string;
   flagged_at: string;
   updated_at: string;
+  matched_experience_id: string | null;
 }
 
 interface CandidateRow {
@@ -24,6 +25,7 @@ interface CandidateRow {
   frustration_signature: string;
   failed_approaches: string; // JSON
   successful_approach: string | null;
+  matched_experience_id: string | null;
   lessons: string; // JSON
   status: string;
   created_at: string;
@@ -31,6 +33,18 @@ interface CandidateRow {
 
 interface ExperienceRow {
   id: string;
+  frustration_signature: string;
+  failed_approaches: string; // JSON
+  successful_approach: string | null;
+  lessons: string; // JSON
+  created_at: string;
+  revision: number;
+}
+
+interface ExperienceRevisionRow {
+  id: string;
+  experience_id: string;
+  revision: number;
   frustration_signature: string;
   failed_approaches: string; // JSON
   successful_approach: string | null;
@@ -99,6 +113,40 @@ export class SqliteStore {
         ON session_turns(session_id);
     `);
 
+    // Migration: add revision column to experiences table
+    try {
+      this.db.exec('ALTER TABLE experiences ADD COLUMN revision INTEGER DEFAULT 1');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Migration: add matched_experience_id column to session_flags table
+    try {
+      this.db.exec('ALTER TABLE session_flags ADD COLUMN matched_experience_id TEXT');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Migration: add matched_experience_id column to auto_memory_candidates table
+    try {
+      this.db.exec('ALTER TABLE auto_memory_candidates ADD COLUMN matched_experience_id TEXT');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Create experience_revisions table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS experience_revisions (
+        id TEXT PRIMARY KEY,
+        experience_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        frustration_signature TEXT NOT NULL,
+        failed_approaches TEXT NOT NULL,
+        successful_approach TEXT,
+        lessons TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
   }
 
   /**
@@ -141,21 +189,21 @@ export class SqliteStore {
   // session_flags
   // =========================================================================
 
-  setFlag(sessionId: string, status: string): void {
+  setFlag(sessionId: string, status: string, matchedExperienceId?: string): void {
     this.ensureOpen();
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO session_flags (session_id, status, flagged_at, updated_at)
-         VALUES (?, ?, datetime('now'), datetime('now'))`,
+        `INSERT OR REPLACE INTO session_flags (session_id, status, matched_experience_id, flagged_at, updated_at)
+         VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
       )
-      .run(sessionId, status);
+      .run(sessionId, status, matchedExperienceId ?? null);
   }
 
   getFlag(sessionId: string): FlagRow | null {
     this.ensureOpen();
     const row = this.db
       .prepare(
-        'SELECT session_id, status, flagged_at, updated_at FROM session_flags WHERE session_id = ?',
+        'SELECT session_id, status, matched_experience_id, flagged_at, updated_at FROM session_flags WHERE session_id = ?',
       )
       .get(sessionId) as FlagRow | undefined;
     return row ?? null;
@@ -185,8 +233,8 @@ export class SqliteStore {
     this.ensureOpen();
     this.db
       .prepare(
-        `INSERT INTO auto_memory_candidates (id, session_id, transcript_data, frustration_signature, failed_approaches, successful_approach, lessons, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO auto_memory_candidates (id, session_id, transcript_data, frustration_signature, failed_approaches, successful_approach, matched_experience_id, lessons, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         candidate.id,
@@ -195,6 +243,7 @@ export class SqliteStore {
         candidate.frustrationSignature,
         JSON.stringify(candidate.failedApproaches),
         candidate.successfulApproach ?? null,
+        candidate.matchedExperienceId ?? null,
         JSON.stringify(candidate.lessons),
         candidate.status,
         candidate.createdAt,
@@ -205,7 +254,7 @@ export class SqliteStore {
     this.ensureOpen();
     const rows = this.db
       .prepare(
-        'SELECT id, session_id, transcript_data, frustration_signature, failed_approaches, successful_approach, lessons, status, created_at FROM auto_memory_candidates WHERE status = ?',
+        'SELECT id, session_id, transcript_data, frustration_signature, failed_approaches, successful_approach, matched_experience_id, lessons, status, created_at FROM auto_memory_candidates WHERE status = ?',
       )
       .all('pending') as CandidateRow[];
 
@@ -234,8 +283,8 @@ export class SqliteStore {
     this.ensureOpen();
     this.db
       .prepare(
-        `INSERT INTO experiences (id, frustration_signature, failed_approaches, successful_approach, lessons, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO experiences (id, frustration_signature, failed_approaches, successful_approach, lessons, created_at, revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         experience.id,
@@ -244,6 +293,7 @@ export class SqliteStore {
         experience.successfulApproach ?? null,
         JSON.stringify(experience.lessons),
         experience.createdAt,
+        experience.revision ?? 1,
       );
   }
 
@@ -259,7 +309,7 @@ export class SqliteStore {
     this.ensureOpen();
     const row = this.db
       .prepare(
-        'SELECT id, frustration_signature, failed_approaches, successful_approach, lessons, created_at FROM experiences WHERE id = ?',
+        'SELECT id, frustration_signature, failed_approaches, successful_approach, lessons, created_at, revision FROM experiences WHERE id = ?',
       )
       .get(id) as ExperienceRow | undefined;
 
@@ -272,7 +322,7 @@ export class SqliteStore {
     this.ensureOpen();
     const rows = this.db
       .prepare(
-        'SELECT id, frustration_signature, failed_approaches, successful_approach, lessons, created_at FROM experiences ORDER BY created_at DESC',
+        'SELECT id, frustration_signature, failed_approaches, successful_approach, lessons, created_at, revision FROM experiences ORDER BY created_at DESC',
       )
       .all() as ExperienceRow[];
     return rows.map((row) => this.experienceRowToModel(row));
@@ -286,6 +336,56 @@ export class SqliteStore {
     return result.changes > 0;
   }
 
+  updateExperience(experience: FailureExperience): void {
+    this.ensureOpen();
+    this.db
+      .prepare(
+        `UPDATE experiences SET frustration_signature = ?, failed_approaches = ?, successful_approach = ?, lessons = ?, created_at = ?, revision = ? WHERE id = ?`,
+      )
+      .run(
+        experience.frustrationSignature,
+        JSON.stringify(experience.failedApproaches),
+        experience.successfulApproach ?? null,
+        JSON.stringify(experience.lessons),
+        experience.createdAt,
+        experience.revision ?? 1,
+        experience.id,
+      );
+  }
+
+  // =========================================================================
+  // experience_revisions
+  // =========================================================================
+
+  storeRevision(revision: ExperienceRevision): void {
+    this.ensureOpen();
+    this.db
+      .prepare(
+        `INSERT INTO experience_revisions (id, experience_id, revision, frustration_signature, failed_approaches, successful_approach, lessons, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        revision.id,
+        revision.experienceId,
+        revision.revision,
+        revision.frustrationSignature,
+        JSON.stringify(revision.failedApproaches),
+        revision.successfulApproach ?? null,
+        JSON.stringify(revision.lessons),
+        revision.createdAt,
+      );
+  }
+
+  getRevisions(experienceId: string): ExperienceRevision[] {
+    this.ensureOpen();
+    const rows = this.db
+      .prepare(
+        'SELECT id, experience_id, revision, frustration_signature, failed_approaches, successful_approach, lessons, created_at FROM experience_revisions WHERE experience_id = ? ORDER BY revision ASC',
+      )
+      .all(experienceId) as ExperienceRevisionRow[];
+    return rows.map((row) => this.revisionRowToModel(row));
+  }
+
   resetAll(): void {
     this.ensureOpen();
     this.db.exec('DELETE FROM experiences');
@@ -293,6 +393,7 @@ export class SqliteStore {
     this.db.exec('DELETE FROM session_flags');
     this.db.exec('DELETE FROM session_turns');
     this.db.exec('DELETE FROM session_advices');
+    this.db.exec('DELETE FROM experience_revisions');
   }
 
   // =========================================================================
@@ -338,6 +439,7 @@ export class SqliteStore {
       frustrationSignature: row.frustration_signature,
       failedApproaches: this.parseJsonArray(row.failed_approaches),
       successfulApproach: row.successful_approach ?? undefined,
+      matchedExperienceId: row.matched_experience_id ?? undefined,
       lessons: this.parseJsonArray(row.lessons),
       status: row.status as AutoMemoryCandidate['status'],
       createdAt: row.created_at,
@@ -347,6 +449,20 @@ export class SqliteStore {
   private experienceRowToModel(row: ExperienceRow): FailureExperience {
     return {
       id: row.id,
+      frustrationSignature: row.frustration_signature,
+      failedApproaches: this.parseJsonArray(row.failed_approaches),
+      successfulApproach: row.successful_approach ?? undefined,
+      lessons: this.parseJsonArray(row.lessons),
+      createdAt: row.created_at,
+      revision: row.revision,
+    };
+  }
+
+  private revisionRowToModel(row: ExperienceRevisionRow): ExperienceRevision {
+    return {
+      id: row.id,
+      experienceId: row.experience_id,
+      revision: row.revision,
       frustrationSignature: row.frustration_signature,
       failedApproaches: this.parseJsonArray(row.failed_approaches),
       successfulApproach: row.successful_approach ?? undefined,

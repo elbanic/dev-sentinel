@@ -85,6 +85,7 @@ function makeExperience(overrides: Partial<FailureExperience> = {}): FailureExpe
     successfulApproach: 'Initialized the variable before use',
     lessons: ['Always check initialization order'],
     createdAt: '2026-02-15T10:00:00Z',
+    revision: 1,
     ...overrides,
   };
 }
@@ -257,7 +258,7 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
       });
 
       // Assert
-      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-002', 'frustrated');
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-002', 'frustrated', 'exp-001');
     });
 
     it('should call searchMemory with the prompt, llmProvider, vectorStore, sqliteStore, and exclusion list', async () => {
@@ -356,7 +357,7 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
       });
 
       // Assert
-      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-011', 'frustrated');
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-011', 'frustrated', undefined);
     });
   });
 
@@ -932,7 +933,7 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
       expect(result).toBe('{}');
     });
 
-    it('should still call setFlag before searchMemory throws', async () => {
+    it('should still call setFlag even when searchMemory throws', async () => {
       // Arrange
       mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'frustrated' }));
       mockedSearchMemory.mockRejectedValue(new Error('Search failed'));
@@ -946,8 +947,8 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
         vectorStore: mockVectorStore,
       });
 
-      // Assert: setFlag should have been called before searchMemory was attempted
-      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-091', 'frustrated');
+      // Assert: setFlag should still be called even when searchMemory throws
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-091', 'frustrated', undefined);
     });
 
     it('should never throw when searchMemory rejects', async () => {
@@ -1251,7 +1252,7 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
       });
 
       // Assert: flag should still be set
-      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-max-004', 'frustrated');
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-max-004', 'frustrated', undefined);
     });
   });
 
@@ -1350,6 +1351,57 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
 
       // Assert
       expect(mockedAnalyzeFrustration).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // =========================================================================
+  // setFlag with matchedExperienceId propagation
+  // =========================================================================
+  describe('setFlag with matchedExperienceId propagation', () => {
+    it('should call setFlag with matchedExperienceId when match is found', async () => {
+      const match = makeMatchResult({ experience: makeExperience({ id: 'exp-matched' }) });
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'frustrated' }));
+      mockedSearchMemory.mockResolvedValue(match);
+
+      await handleUserPromptSubmit({
+        prompt: 'error again',
+        sessionId: 'session-flag-match',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-flag-match', 'frustrated', 'exp-matched');
+    });
+
+    it('should call setFlag with undefined matchedExperienceId when no match', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'frustrated' }));
+      mockedSearchMemory.mockResolvedValue(null);
+
+      await handleUserPromptSubmit({
+        prompt: 'error again',
+        sessionId: 'session-flag-no-match',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-flag-no-match', 'frustrated', undefined);
+    });
+
+    it('should still call setFlag even when searchMemory throws', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'frustrated' }));
+      mockedSearchMemory.mockRejectedValue(new Error('search failed'));
+
+      await handleUserPromptSubmit({
+        prompt: 'error again',
+        sessionId: 'session-flag-err',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.setFlag).toHaveBeenCalledWith('session-flag-err', 'frustrated', undefined);
     });
   });
 

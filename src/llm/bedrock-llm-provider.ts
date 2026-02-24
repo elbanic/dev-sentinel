@@ -18,25 +18,28 @@ export class BedrockLLMProvider implements LLMProvider {
   private region: string;
   private completionModel: string;
   private embeddingModel: string;
+  private thinkingModel?: string;
   private client: BedrockRuntimeClient;
 
   getModelName(): string {
     return this.completionModel;
   }
 
-  constructor(region: string, completionModel: string, embeddingModel: string, profile?: string) {
+  constructor(region: string, completionModel: string, embeddingModel: string, profile?: string, thinkingModel?: string) {
     this.region = region;
     this.completionModel = completionModel;
     this.embeddingModel = embeddingModel;
+    this.thinkingModel = thinkingModel;
     this.client = new BedrockRuntimeClient({
       region,
       ...(profile ? { credentials: fromIni({ profile }) } : {}),
     });
   }
 
-  async generateCompletion(system: string, user: string, _options?: CompletionOptions): Promise<string> {
+  async generateCompletion(system: string, user: string, options?: CompletionOptions): Promise<string> {
+    const modelId = (options?.think && this.thinkingModel) ? this.thinkingModel : this.completionModel;
     const command = new ConverseCommand({
-      modelId: this.completionModel,
+      modelId,
       system: [{ text: system }],
       messages: [
         {

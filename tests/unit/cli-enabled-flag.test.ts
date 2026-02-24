@@ -294,6 +294,7 @@ describe('CLI - enabled flag early exit', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-18T10:00:00Z',
+        revision: 1,
       });
 
       // Act

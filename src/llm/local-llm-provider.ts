@@ -27,15 +27,17 @@ export class LocalLLMProvider implements LLMProvider {
   private baseUrl: string;
   private completionModel: string;
   private embeddingModel: string;
+  private thinkingModel?: string;
 
   getModelName(): string {
     return this.completionModel;
   }
 
-  constructor(baseUrl: string, completionModel: string, embeddingModel: string) {
+  constructor(baseUrl: string, completionModel: string, embeddingModel: string, thinkingModel?: string) {
     this.baseUrl = baseUrl;
     this.completionModel = completionModel;
     this.embeddingModel = embeddingModel;
+    this.thinkingModel = thinkingModel;
   }
 
   async generateCompletion(system: string, user: string, options?: CompletionOptions): Promise<string> {
@@ -43,8 +45,9 @@ export class LocalLLMProvider implements LLMProvider {
 
     if (useThink) {
       // /api/generate: qwen3 thinks automatically, format:"json" constrains final output
+      // Use thinkingModel (larger/more capable) if provided, otherwise fall back to completionModel
       const json = await this.postJSON(`${this.baseUrl}/api/generate`, {
-        model: this.completionModel,
+        model: this.thinkingModel ?? this.completionModel,
         system,
         prompt: user,
         stream: false,

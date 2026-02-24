@@ -46,6 +46,7 @@ function runCapturePipeline(
   sessionId: string,
   transcriptPath: string,
   sqliteStore: SqliteStore,
+  matchedExperienceId?: string,
 ): void {
   const sentinelDir = path.join(os.homedir(), '.sentinel');
 
@@ -93,6 +94,7 @@ function runCapturePipeline(
       frustrationSignature: errorSummary,
       failedApproaches: [],
       successfulApproach: undefined,
+      matchedExperienceId,
       lessons: [],
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -147,8 +149,10 @@ export async function handleStop(input: {
       return APPROVE_RESPONSE;
     }
 
+    const matchedExperienceId = flag.matched_experience_id ?? undefined;
+
     try {
-      runCapturePipeline(sessionId, transcriptPath, sqliteStore);
+      runCapturePipeline(sessionId, transcriptPath, sqliteStore, matchedExperienceId);
     } finally {
       safeClearFlag(sqliteStore, sessionId);
     }

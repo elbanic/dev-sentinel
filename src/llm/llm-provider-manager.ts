@@ -30,11 +30,11 @@ export class LLMProviderManager {
 
     // Create provider based on settings
     if (this.settings.llm.provider === 'bedrock' && this.settings.llm.bedrock) {
-      const { region, completionModel, embeddingModel, profile } = this.settings.llm.bedrock;
-      this.cachedProvider = new BedrockLLMProvider(region, completionModel, embeddingModel, profile);
+      const { region, completionModel, embeddingModel, profile, thinkingModel } = this.settings.llm.bedrock;
+      this.cachedProvider = new BedrockLLMProvider(region, completionModel, embeddingModel, profile, thinkingModel);
     } else {
-      const { baseUrl, completionModel, embeddingModel } = this.settings.llm.ollama;
-      this.cachedProvider = new LocalLLMProvider(baseUrl, completionModel, embeddingModel);
+      const { baseUrl, completionModel, embeddingModel, thinkingModel } = this.settings.llm.ollama;
+      this.cachedProvider = new LocalLLMProvider(baseUrl, completionModel, embeddingModel, thinkingModel);
     }
 
     return this.cachedProvider;

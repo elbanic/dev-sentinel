@@ -18,7 +18,7 @@
  */
 
 import { SqliteStore } from '../../src/storage/sqlite-store';
-import type { AutoMemoryCandidate, FailureExperience } from '../../src/types/index';
+import type { AutoMemoryCandidate, ExperienceRevision, FailureExperience } from '../../src/types/index';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +46,7 @@ function makeExperience(overrides: Partial<FailureExperience> = {}): FailureExpe
     successfulApproach: 'Used path.resolve with __dirname',
     lessons: ['Always use absolute paths', 'Never trust user-provided paths without normalization'],
     createdAt: '2026-02-16T10:00:00Z',
+    revision: 1,
     ...overrides,
   };
 }
@@ -211,6 +212,16 @@ describe('SqliteStore', () => {
 
       expect(flag).not.toBeNull();
       expect(flag!.status).toBe('capture');
+    });
+
+    // Test 10b: upgradeFlag preserves matchedExperienceId
+    it('should preserve matched_experience_id when upgrading flag status', () => {
+      store.setFlag('session-preserve', 'frustrated', 'exp-999');
+      store.upgradeFlag('session-preserve', 'capture');
+      const flag = store.getFlag('session-preserve');
+      expect(flag).not.toBeNull();
+      expect(flag!.status).toBe('capture');
+      expect(flag!.matched_experience_id).toBe('exp-999');
     });
 
     // Test 11: clearFlag removes the flag
@@ -524,6 +535,174 @@ describe('SqliteStore', () => {
 
     it('should handle updateCandidateStatus on a non-existent candidate without throwing', () => {
       expect(() => store.updateCandidateStatus('ghost-candidate', 'confirmed')).not.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // setFlag with matchedExperienceId
+  // =========================================================================
+  describe('setFlag with matchedExperienceId', () => {
+    it('should store matchedExperienceId when provided', () => {
+      store.setFlag('session-match', 'frustrated', 'exp-001');
+      const flag = store.getFlag('session-match');
+      expect(flag).not.toBeNull();
+      expect(flag!.matched_experience_id).toBe('exp-001');
+    });
+
+    it('should store null when matchedExperienceId is not provided', () => {
+      store.setFlag('session-no-match', 'frustrated');
+      const flag = store.getFlag('session-no-match');
+      expect(flag).not.toBeNull();
+      expect(flag!.matched_experience_id).toBeNull();
+    });
+
+    it('should store null when matchedExperienceId is undefined', () => {
+      store.setFlag('session-undef', 'frustrated', undefined);
+      const flag = store.getFlag('session-undef');
+      expect(flag).not.toBeNull();
+      expect(flag!.matched_experience_id).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // matchedExperienceId in candidates
+  // =========================================================================
+  describe('matchedExperienceId in candidates', () => {
+    it('should store and retrieve matchedExperienceId', () => {
+      const candidate = makeCandidate({ id: 'draft-matched', matchedExperienceId: 'exp-match-001' });
+      store.storeCandidate(candidate);
+
+      const drafts = store.getPendingDrafts();
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0].matchedExperienceId).toBe('exp-match-001');
+    });
+
+    it('should store null when matchedExperienceId is not provided', () => {
+      const candidate = makeCandidate({ id: 'draft-no-match' });
+      store.storeCandidate(candidate);
+
+      const drafts = store.getPendingDrafts();
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0].matchedExperienceId).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // experience revisions
+  // =========================================================================
+  describe('experience revisions', () => {
+    it('should store and retrieve revisions', () => {
+      store.storeRevision({
+        id: 'rev-001',
+        experienceId: 'exp-001',
+        revision: 1,
+        frustrationSignature: 'Test error',
+        failedApproaches: ['approach 1'],
+        successfulApproach: 'solution',
+        lessons: ['lesson 1'],
+        createdAt: '2026-02-16T10:00:00Z',
+      });
+
+      const revisions = store.getRevisions('exp-001');
+      expect(revisions).toHaveLength(1);
+      expect(revisions[0].id).toBe('rev-001');
+      expect(revisions[0].experienceId).toBe('exp-001');
+      expect(revisions[0].revision).toBe(1);
+      expect(revisions[0].failedApproaches).toEqual(['approach 1']);
+      expect(revisions[0].lessons).toEqual(['lesson 1']);
+    });
+
+    it('should return revisions in ascending revision order', () => {
+      store.storeRevision({
+        id: 'rev-002', experienceId: 'exp-001', revision: 2,
+        frustrationSignature: 'Test', failedApproaches: [], lessons: [],
+        createdAt: '2026-02-16T11:00:00Z',
+      });
+      store.storeRevision({
+        id: 'rev-001', experienceId: 'exp-001', revision: 1,
+        frustrationSignature: 'Test', failedApproaches: [], lessons: [],
+        createdAt: '2026-02-16T10:00:00Z',
+      });
+
+      const revisions = store.getRevisions('exp-001');
+      expect(revisions).toHaveLength(2);
+      expect(revisions[0].revision).toBe(1);
+      expect(revisions[1].revision).toBe(2);
+    });
+
+    it('should return empty array for non-existent experience', () => {
+      const revisions = store.getRevisions('non-existent');
+      expect(revisions).toEqual([]);
+    });
+  });
+
+  // =========================================================================
+  // updateExperience
+  // =========================================================================
+  describe('updateExperience', () => {
+    it('should update an existing experience', () => {
+      const original = makeExperience({ id: 'exp-update' });
+      store.storeExperience(original);
+
+      store.updateExperience({
+        ...original,
+        frustrationSignature: 'Updated signature',
+        failedApproaches: ['old approach', 'new approach'],
+        successfulApproach: 'New solution',
+        lessons: ['Updated lesson'],
+        revision: 2,
+      });
+
+      const updated = store.getExperience('exp-update');
+      expect(updated).not.toBeNull();
+      expect(updated!.frustrationSignature).toBe('Updated signature');
+      expect(updated!.failedApproaches).toEqual(['old approach', 'new approach']);
+      expect(updated!.successfulApproach).toBe('New solution');
+      expect(updated!.lessons).toEqual(['Updated lesson']);
+      expect(updated!.revision).toBe(2);
+    });
+  });
+
+  // =========================================================================
+  // experience revision default
+  // =========================================================================
+  describe('experience revision field', () => {
+    it('should default revision to 1 when storing experience', () => {
+      store.storeExperience(makeExperience({ id: 'exp-default-rev' }));
+      const exp = store.getExperience('exp-default-rev');
+      expect(exp).not.toBeNull();
+      expect(exp!.revision).toBe(1);
+    });
+
+    it('should store explicit revision value', () => {
+      store.storeExperience({ ...makeExperience({ id: 'exp-rev-3' }), revision: 3 });
+      const exp = store.getExperience('exp-rev-3');
+      expect(exp!.revision).toBe(3);
+    });
+  });
+
+  // =========================================================================
+  // migration idempotent
+  // =========================================================================
+  describe('migration idempotency', () => {
+    it('should handle calling initialize() twice without error', () => {
+      expect(() => store.initialize()).not.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // resetAll includes experience_revisions
+  // =========================================================================
+  describe('resetAll with revisions', () => {
+    it('should clear experience_revisions on resetAll', () => {
+      store.storeRevision({
+        id: 'rev-reset', experienceId: 'exp-001', revision: 1,
+        frustrationSignature: 'Test', failedApproaches: [], lessons: [],
+        createdAt: '2026-02-16T10:00:00Z',
+      });
+      store.resetAll();
+      const revisions = store.getRevisions('exp-001');
+      expect(revisions).toEqual([]);
     });
   });
 });

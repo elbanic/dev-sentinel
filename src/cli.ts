@@ -118,6 +118,7 @@ async function confirmExperience(opts: ConfirmExperienceOpts): Promise<ConfirmEx
     successfulApproach,
     lessons,
     createdAt,
+    revision: 1,
   });
 
   vectorStore.store(id, embedding, { frustrationSignature });
@@ -234,6 +235,9 @@ export function createProgram(deps: CreateProgramDeps): Command {
       for (const draft of drafts) {
         write(SEP);
         write(`Draft: ${draft.id}\n`);
+        if (draft.matchedExperienceId) {
+          write(`(evolution candidate)\n`);
+        }
         write(`Created: ${draft.createdAt}\n`);
         write(`Issue: ${truncate(draft.frustrationSignature || '(empty)', 80)}\n`);
         if (draft.transcriptData) {
@@ -351,8 +355,10 @@ export function createProgram(deps: CreateProgramDeps): Command {
         );
         const draft = sorted[0];
         try {
-          await confirmSingleDraft(draft);
-          write(`Draft "${draft.id}" confirmed and stored as experience.\n`);
+          const status = await confirmSingleDraft(draft);
+          if (status === 'stored') {
+            write(`Draft "${draft.id}" confirmed and stored as experience.\n`);
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           writeErr(`Error confirming draft "${draft.id}": ${message}\n`);
@@ -375,19 +381,62 @@ export function createProgram(deps: CreateProgramDeps): Command {
       }
 
       try {
-        await confirmSingleDraft(draft);
-        write(`Draft "${id}" confirmed and stored as experience.\n`);
+        const status = await confirmSingleDraft(draft);
+        if (status === 'stored') {
+          write(`Draft "${id}" confirmed and stored as experience.\n`);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         writeErr(`Error confirming draft "${id}": ${message}\n`);
       }
     });
 
+  function buildEvolutionJudgeInput(
+    existing: { frustrationSignature: string; failedApproaches: string[]; successfulApproach?: string; lessons: string[] },
+    newFields: { frustrationSignature: string; failedApproaches: string[]; successfulApproach?: string; lessons: string[] },
+  ): string {
+    return `── Existing Experience ──
+Situation: ${existing.frustrationSignature}
+Failed approaches: ${existing.failedApproaches.join('; ') || '(none)'}
+Successful approach: ${existing.successfulApproach || '(none)'}
+Lessons: ${existing.lessons.join('; ') || '(none)'}
+
+── New Encounter ──
+Situation: ${newFields.frustrationSignature}
+Failed approaches: ${newFields.failedApproaches.join('; ') || '(none)'}
+Successful approach: ${newFields.successfulApproach || '(none)'}
+Lessons: ${newFields.lessons.join('; ') || '(none)'}`;
+  }
+
+  function parseEvolutionJudgment(raw: string): {
+    isBetter: boolean;
+    reasoning: string;
+    mergedLessons: string[];
+    newFailedApproachNote: string;
+  } | null {
+    try {
+      const parsed = parseLLMJson(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const obj = parsed as Record<string, unknown>;
+      if (typeof obj.isBetter !== 'boolean') return null;
+      return {
+        isBetter: obj.isBetter,
+        reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
+        mergedLessons: Array.isArray(obj.mergedLessons) ? obj.mergedLessons.map(String) : [],
+        newFailedApproachNote: typeof obj.newFailedApproachNote === 'string' ? obj.newFailedApproachNote : '',
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Confirm a single draft: build content, run LLM summarization, store experience.
+   * If the draft has a matchedExperienceId, attempt evolution before falling back to normal flow.
+   * Returns a status indicating the outcome so callers can write appropriate messages.
    * Throws on failure (caller handles error reporting).
    */
-  async function confirmSingleDraft(draft: ReturnType<SqliteStore['getPendingDrafts']>[number]): Promise<void> {
+  async function confirmSingleDraft(draft: ReturnType<SqliteStore['getPendingDrafts']>[number]): Promise<'evolved' | 'stored' | 'duplicate'> {
     let content = '';
     if (draft.transcriptData) {
       const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -428,6 +477,105 @@ export function createProgram(deps: CreateProgramDeps): Command {
       }
     }
 
+    // --- Evolution branch ---
+    if (draft.matchedExperienceId) {
+      const existingExp = sqliteStore.getExperience(draft.matchedExperienceId);
+      if (existingExp) {
+        try {
+          // 1st LLM call: summarize the new transcript
+          const summarizationResponse = await llmProvider.generateCompletion(
+            PROMPTS.lessonSummarization,
+            content || '(no content)',
+            { think: true },
+          );
+          const summarizationStripped = stripThinkBlock(summarizationResponse);
+          const summarizationParsed = parseLLMJson(summarizationStripped);
+
+          let newFields = {
+            frustrationSignature: draft.frustrationSignature,
+            failedApproaches: draft.failedApproaches,
+            successfulApproach: draft.successfulApproach,
+            lessons: draft.lessons,
+          };
+          if (summarizationParsed && typeof summarizationParsed === 'object' && !Array.isArray(summarizationParsed)) {
+            const obj = summarizationParsed as Record<string, unknown>;
+            newFields = extractNoteFields(obj, newFields);
+          }
+
+          // 2nd LLM call: evolution judge
+          const judgeInput = buildEvolutionJudgeInput(existingExp, newFields);
+          const judgeResponse = await llmProvider.generateCompletion(
+            PROMPTS.evolutionJudge,
+            judgeInput,
+            { think: true },
+          );
+          const judgeStripped = stripThinkBlock(judgeResponse);
+          const judgment = parseEvolutionJudgment(judgeStripped);
+
+          if (judgment && judgment.isBetter) {
+            // Store revision history (snapshot of current state)
+            sqliteStore.storeRevision({
+              id: randomUUID(),
+              experienceId: existingExp.id,
+              revision: existingExp.revision ?? 1,
+              frustrationSignature: existingExp.frustrationSignature,
+              failedApproaches: existingExp.failedApproaches,
+              successfulApproach: existingExp.successfulApproach,
+              lessons: existingExp.lessons,
+              createdAt: existingExp.createdAt,
+            });
+
+            // Build updated failed approaches: existing ones + old success demoted + judgment note
+            const updatedFailedApproaches = [...existingExp.failedApproaches];
+            if (existingExp.successfulApproach) {
+              updatedFailedApproaches.push(existingExp.successfulApproach);
+            }
+            if (judgment.newFailedApproachNote) {
+              updatedFailedApproaches.push(judgment.newFailedApproachNote);
+            }
+
+            // Update experience
+            const newRevision = (existingExp.revision ?? 1) + 1;
+            sqliteStore.updateExperience({
+              id: existingExp.id,
+              frustrationSignature: newFields.frustrationSignature || existingExp.frustrationSignature,
+              failedApproaches: updatedFailedApproaches,
+              successfulApproach: newFields.successfulApproach,
+              lessons: judgment.mergedLessons.length > 0 ? judgment.mergedLessons : newFields.lessons,
+              createdAt: existingExp.createdAt,
+              revision: newRevision,
+            });
+
+            // Re-embed with same ID (INSERT OR REPLACE in vector store)
+            // Wrapped in its own try/catch: if embedding fails, the experience is still
+            // updated (vector will be slightly stale but the metadata is correct).
+            try {
+              const failed = updatedFailedApproaches.join('; ');
+              const fixed = newFields.successfulApproach ?? '';
+              const lessonsText = (judgment.mergedLessons.length > 0 ? judgment.mergedLessons : newFields.lessons).join('; ');
+              const sig = newFields.frustrationSignature || existingExp.frustrationSignature;
+              const embeddingText = `${sig}. Failed: ${failed}. Fixed: ${fixed}. Lessons: ${lessonsText}`;
+              const embedding = await llmProvider.generateEmbedding(embeddingText);
+              vectorStore.store(existingExp.id, embedding, { frustrationSignature: sig });
+            } catch {
+              // Re-embedding failed: experience is updated but vector may be stale.
+              // This is acceptable for graceful degradation.
+              writeErr(`Warning: re-embedding failed for "${existingExp.id}", vector may be stale.\n`);
+            }
+
+            sqliteStore.deleteCandidate(draft.id);
+            write(`Draft "${draft.id}" evolved experience "${existingExp.id}" to v${newRevision}.\n`);
+            return 'evolved';
+          }
+          // isBetter === false: fall through to normal flow
+        } catch {
+          // Evolution LLM failed: fall through to normal flow (graceful fallback)
+        }
+      }
+      // existingExp not found or evolution declined: fall through to normal flow
+    }
+
+    // --- Normal flow (existing code) ---
     const result = await confirmExperience({
       id: draft.id,
       content,
@@ -444,7 +592,9 @@ export function createProgram(deps: CreateProgramDeps): Command {
     sqliteStore.deleteCandidate(draft.id);
     if (!result.stored) {
       write(`Draft "${draft.id}" skipped (duplicate of existing experience).\n`);
+      return 'duplicate';
     }
+    return 'stored';
   }
 
   // review reject [id] | --all
@@ -587,7 +737,8 @@ export function createProgram(deps: CreateProgramDeps): Command {
 
       for (const exp of experiences) {
         write(SEP);
-        write(`ID: ${exp.id}\n`);
+        const versionTag = exp.revision > 1 ? ` (v${exp.revision})` : '';
+        write(`ID: ${exp.id}${versionTag}\n`);
         write(`Issue: ${truncate(exp.frustrationSignature || '(empty)', 80)}\n`);
         write(`Created: ${exp.createdAt}\n`);
         if (exp.lessons.length > 0) {
@@ -615,6 +766,7 @@ export function createProgram(deps: CreateProgramDeps): Command {
       const SEP = '─'.repeat(50) + '\n';
       write(SEP);
       write(`ID: ${experience.id}\n`);
+      write(`Revision: ${experience.revision}\n`);
       write(`Created: ${experience.createdAt}\n`);
       write(`Issue: ${experience.frustrationSignature || '(empty)'}\n`);
       write(SEP);
@@ -638,6 +790,43 @@ export function createProgram(deps: CreateProgramDeps): Command {
       }
 
       write(SEP);
+    });
+
+  // ---- history command ----
+  program
+    .command('history <id>')
+    .description('Show revision history for an experience')
+    .action((id: string) => {
+      const experience = sqliteStore.getExperience(id);
+      if (!experience) {
+        writeErr(`Experience "${id}" not found.\n`);
+        return;
+      }
+
+      const revisions = sqliteStore.getRevisions(id);
+      if (revisions.length === 0) {
+        write(`No revision history for "${id}" (current: v${experience.revision ?? 1}).\n`);
+        return;
+      }
+
+      const SEP = '─'.repeat(50) + '\n';
+      write(`History for: ${id} (current: v${experience.revision ?? 1})\n`);
+      write(SEP);
+
+      for (const rev of revisions) {
+        write(`v${rev.revision} — ${rev.createdAt}\n`);
+        write(`  Situation: ${rev.frustrationSignature}\n`);
+        if (rev.failedApproaches.length > 0) {
+          write(`  Failed: ${rev.failedApproaches.join('; ')}\n`);
+        }
+        if (rev.successfulApproach) {
+          write(`  Solution: ${rev.successfulApproach}\n`);
+        }
+        if (rev.lessons.length > 0) {
+          write(`  Lessons: ${rev.lessons.join('; ')}\n`);
+        }
+        write('\n');
+      }
     });
 
   // ---- delete command ----

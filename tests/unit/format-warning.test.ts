@@ -10,6 +10,7 @@ function makeMatch(overrides: Partial<MatchResult> = {}): MatchResult {
       successfulApproach: 'mkdir -p first',
       lessons: ['Always check directory exists'],
       createdAt: '2025-01-01T00:00:00Z',
+      revision: 1,
     },
     confidence: 0.85,
     suggestedAction: 'Check that the target directory exists before writing.',

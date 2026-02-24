@@ -37,6 +37,7 @@ function makeExperience(overrides: Partial<FailureExperience> = {}): FailureExpe
     successfulApproach: 'Initialized the variable before use',
     lessons: ['Always check initialization order'],
     createdAt: '2026-02-15T10:00:00Z',
+    revision: 1,
     ...overrides,
   };
 }

@@ -49,9 +49,26 @@ export const FailureExperienceSchema = z.object({
   successfulApproach: z.string().optional(),
   lessons: z.array(z.string()),
   createdAt: z.string(),
+  revision: z.number().int().min(1).default(1),
 });
 
 export type FailureExperience = z.infer<typeof FailureExperienceSchema>;
+
+// ---------------------------------------------------------------------------
+// 4b. ExperienceRevisionSchema
+// ---------------------------------------------------------------------------
+export const ExperienceRevisionSchema = z.object({
+  id: z.string(),
+  experienceId: z.string(),
+  revision: z.number().int().min(1),
+  frustrationSignature: z.string(),
+  failedApproaches: z.array(z.string()),
+  successfulApproach: z.string().optional(),
+  lessons: z.array(z.string()),
+  createdAt: z.string(),
+});
+
+export type ExperienceRevision = z.infer<typeof ExperienceRevisionSchema>;
 
 // ---------------------------------------------------------------------------
 // 5. AutoMemoryCandidateSchema
@@ -63,6 +80,7 @@ export const AutoMemoryCandidateSchema = z.object({
   frustrationSignature: z.string(),
   failedApproaches: z.array(z.string()),
   successfulApproach: z.string().optional(),
+  matchedExperienceId: z.string().optional(),
   lessons: z.array(z.string()),
   status: z.enum(['pending', 'confirmed', 'rejected']),
   createdAt: z.string(),
@@ -101,12 +119,14 @@ export type MatchResult = z.infer<typeof MatchResultSchema>;
 const OllamaSettingsSchema = z.object({
   baseUrl: z.string().default('http://localhost:11434'),
   completionModel: z.string().default('qwen3:4b'),
+  thinkingModel: z.string().optional(),
   embeddingModel: z.string().default('qwen3-embedding:0.6b'),
 });
 
 const BedrockSettingsSchema = z.object({
   region: z.string().default('us-east-1'),
   completionModel: z.string().default('us.anthropic.claude-sonnet-4-20250514-v1:0'),
+  thinkingModel: z.string().optional(),
   embeddingModel: z.string().default('amazon.titan-embed-text-v2:0'),
   profile: z.string().optional(),
 });

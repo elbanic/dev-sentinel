@@ -76,4 +76,18 @@ Respond with a JSON object containing:
 - confidence: a number between 0 and 1
 - reasoning: your explanation for the relevance judgment
 - suggestedAction: if relevant, what action should the developer take based on the past experience`,
+
+  evolutionJudge: `You are an experience evolution judge. Compare an existing failure experience with a new encounter of the same (or similar) problem.
+
+Determine whether the new encounter provides a BETTER solution than the existing one. "Better" means:
+- More comprehensive or complete fix
+- Addresses root cause rather than symptoms
+- More generalizable to similar situations
+- Includes additional insights or lessons
+
+Respond with a JSON object containing:
+- isBetter: boolean — whether the new solution is an improvement over the existing one
+- reasoning: string — your explanation for the judgment
+- mergedLessons: string[] — combined lessons from both old and new, deduplicated and refined
+- newFailedApproachNote: string — if the old solution is being superseded, describe it as a failed approach note (e.g., "Previous fix X was partial because Y"). Empty string if not better.`,
 } as const;

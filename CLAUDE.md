@@ -21,6 +21,10 @@
 
 - **When implementing with frameworks or libraries (e.g., Zod, Commander, better-sqlite3, Jest, fast-check, AWS SDK), ALWAYS use context7 MCP to fetch up-to-date documentation first.** Do not rely on memory alone — API surfaces change across versions.
 
+## Shell / CLI Testing
+
+- **NEVER use `!` (exclamation mark) in shell commands or test strings.** Bash interprets `!` as history expansion, causing commands to silently fail or produce unexpected results. Use alternative phrasing or escape with `\!` if absolutely necessary.
+
 ## Anti-Patterns (NEVER use)
 
 - **Keyword matching / hardcoded word lists**: Do NOT use hardcoded keyword sets, phrase lists, or regex-based classification for analysis tasks. All analysis (intent, sentiment, frustration detection, lesson summarization) MUST use LLM. If you need to improve extraction quality, use LLM summarization, not string matching.

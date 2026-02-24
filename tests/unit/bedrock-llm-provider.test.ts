@@ -712,6 +712,72 @@ describe('BedrockLLMProvider', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // thinkingModel
+  // ---------------------------------------------------------------------------
+  describe('thinkingModel', () => {
+    it('should use thinkingModel for think:true when thinkingModel is provided', async () => {
+      mockSend.mockResolvedValueOnce(makeConverseResponse('thinking response'));
+      const provider = new BedrockLLMProvider(
+        'us-east-1', 'anthropic.claude-sonnet-4-20250514', 'amazon.titan-embed-text-v2:0',
+        undefined, 'us.anthropic.claude-opus-4-20250514-v1:0'
+      );
+
+      await provider.generateCompletion('system', 'user', { think: true });
+
+      expect(MockConverseCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelId: 'us.anthropic.claude-opus-4-20250514-v1:0',
+        }),
+      );
+    });
+
+    it('should fall back to completionModel for think:true when thinkingModel is not provided', async () => {
+      mockSend.mockResolvedValueOnce(makeConverseResponse('response'));
+      const provider = createProvider();
+
+      await provider.generateCompletion('system', 'user', { think: true });
+
+      expect(MockConverseCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelId: TEST_COMPLETION_MODEL,
+        }),
+      );
+    });
+
+    it('should always use completionModel for think:false even when thinkingModel is provided', async () => {
+      mockSend.mockResolvedValueOnce(makeConverseResponse('response'));
+      const provider = new BedrockLLMProvider(
+        'us-east-1', 'anthropic.claude-sonnet-4-20250514', 'amazon.titan-embed-text-v2:0',
+        undefined, 'us.anthropic.claude-opus-4-20250514-v1:0'
+      );
+
+      await provider.generateCompletion('system', 'user', { think: false });
+
+      expect(MockConverseCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelId: 'anthropic.claude-sonnet-4-20250514',
+        }),
+      );
+    });
+
+    it('should always use completionModel when options not provided even when thinkingModel is set', async () => {
+      mockSend.mockResolvedValueOnce(makeConverseResponse('response'));
+      const provider = new BedrockLLMProvider(
+        'us-east-1', 'anthropic.claude-sonnet-4-20250514', 'amazon.titan-embed-text-v2:0',
+        undefined, 'us.anthropic.claude-opus-4-20250514-v1:0'
+      );
+
+      await provider.generateCompletion('system', 'user');
+
+      expect(MockConverseCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelId: 'anthropic.claude-sonnet-4-20250514',
+        }),
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Provider with different model configurations
   // ---------------------------------------------------------------------------
   describe('model configuration', () => {

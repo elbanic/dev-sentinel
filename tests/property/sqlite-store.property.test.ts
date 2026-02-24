@@ -73,6 +73,7 @@ const failureExperienceArb = fc.record({
   successfulApproach: fc.option(anyStringArb, { nil: undefined }),
   lessons: stringArrayArb,
   createdAt: nonEmptyStringArb,
+  revision: fc.integer({ min: 1, max: 100 }),
 });
 
 // ---------------------------------------------------------------------------

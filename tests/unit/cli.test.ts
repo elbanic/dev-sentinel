@@ -805,6 +805,7 @@ describe('CLI - createProgram', () => {
         successfulApproach: 'fix',
         lessons: ['lesson'],
         createdAt: '2026-02-16T12:00:00Z',
+        revision: 1,
       });
       sqliteStore.storeExperience({
         id: 'exp-002',
@@ -812,6 +813,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-16T12:01:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1174,6 +1176,7 @@ describe('CLI - createProgram', () => {
         successfulApproach: 'used path.resolve',
         lessons: ['use absolute paths'],
         createdAt: '2026-02-17T10:00:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1196,6 +1199,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-17T10:00:00Z',
+        revision: 1,
       });
       sqliteStore.storeExperience({
         id: 'exp-B',
@@ -1203,6 +1207,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-17T11:00:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1243,6 +1248,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-17T10:00:00Z',
+        revision: 1,
       });
       const embedding = await llmProvider.generateEmbedding('Error to delete');
       vectorStore.store('del-001', embedding, { frustrationSignature: 'Error to delete' });
@@ -1287,6 +1293,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-17T10:00:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1310,6 +1317,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-17T10:00:00Z',
+        revision: 1,
       });
       sqliteStore.storeCandidate(makeCandidate({ id: 'draft-wipe' }));
       const embedding = await llmProvider.generateEmbedding('test');
@@ -1343,6 +1351,7 @@ describe('CLI - createProgram', () => {
         successfulApproach: 'Used path.resolve with __dirname',
         lessons: ['Always use absolute paths', 'Never trust user-provided paths'],
         createdAt: '2026-02-17T10:00:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1371,6 +1380,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: ['Approach A'],
         lessons: ['Still investigating'],
         createdAt: '2026-02-17T11:00:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1395,6 +1405,7 @@ describe('CLI - createProgram', () => {
         failedApproaches: [],
         lessons: [],
         createdAt: '2026-02-17T12:00:00Z',
+        revision: 1,
       });
 
       // Act
@@ -1781,6 +1792,542 @@ describe('CLI - createProgram', () => {
       });
 
       expect(output.toLowerCase()).toContain('no pending drafts');
+    });
+  });
+
+  // =========================================================================
+  // 19. review confirm - evolution: confirm with matchedExperienceId
+  // =========================================================================
+  describe('review confirm - evolution', () => {
+    /**
+     * Evolution logic: when a draft has `matchedExperienceId`, the confirm
+     * flow should attempt to EVOLVE the existing experience instead of
+     * creating a new one.
+     *
+     * Flow:
+     *   1. Look up existing experience by matchedExperienceId
+     *   2. Run LLM summarization on the new transcript (1st LLM call)
+     *   3. Run LLM evolution judge comparing old vs new (2nd LLM call)
+     *   4. If isBetter === true: update existing experience (evolve)
+     *   5. If isBetter === false or LLM fails: create new experience (fallback)
+     *
+     * These tests define the expected behavior BEFORE the evolution
+     * implementation exists. All tests should FAIL initially.
+     */
+
+    it('should evolve existing experience when matchedExperienceId is present and LLM says isBetter', async () => {
+      // Arrange: 1. Store an existing experience
+      const existingExp = {
+        id: 'exp-existing',
+        frustrationSignature: 'Old error pattern',
+        failedApproaches: ['Old approach 1'],
+        successfulApproach: 'Old solution',
+        lessons: ['Old lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 1,
+      };
+      sqliteStore.storeExperience(existingExp);
+      const embedding = await llmProvider.generateEmbedding('Old error pattern');
+      vectorStore.store('exp-existing', embedding, { frustrationSignature: 'Old error pattern' });
+
+      // 2. Store a draft with matchedExperienceId pointing to the existing experience
+      const draft = makeCandidate({
+        id: 'draft-evo',
+        matchedExperienceId: 'exp-existing',
+        transcriptData: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'This error again!' },
+            { role: 'assistant', content: 'I found a better fix.' },
+          ],
+          toolCalls: [],
+          errors: [],
+        }),
+      });
+      sqliteStore.storeCandidate(draft);
+
+      // 3. Mock LLM to return evolution-favorable responses
+      //    First call: lessonSummarization -> extract new note fields
+      //    Second call: evolutionJudge -> determine if new is better
+      const mockProvider = new MockLLMProvider();
+      let callCount = 0;
+      mockProvider.generateCompletion = async (_system: string, _user: string) => {
+        callCount++;
+        if (callCount === 1) {
+          // lessonSummarization response
+          return JSON.stringify({
+            frustrationSignature: 'New error pattern',
+            failedApproaches: ['New approach 1'],
+            successfulApproach: 'Better solution',
+            lessons: ['Better lesson'],
+          });
+        }
+        // evolutionJudge response
+        return JSON.stringify({
+          isBetter: true,
+          reasoning: 'The new solution is more comprehensive',
+          mergedLessons: ['Old lesson', 'Better lesson'],
+          newFailedApproachNote: 'Old solution was partial',
+        });
+      };
+
+      // Act
+      await runCommand(['review', 'confirm', 'draft-evo'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider: mockProvider,
+      });
+
+      // Assert: existing experience was updated (evolved), not a new one created
+      const updated = sqliteStore.getExperience('exp-existing');
+      expect(updated).not.toBeNull();
+      expect(updated!.revision).toBe(2);
+      expect(updated!.lessons).toContain('Better lesson');
+
+      // Assert: revision history was stored for rollback/audit
+      const revisions = sqliteStore.getRevisions('exp-existing');
+      expect(revisions.length).toBeGreaterThanOrEqual(1);
+
+      // Assert: draft was cleaned up
+      const drafts = sqliteStore.getPendingDrafts();
+      expect(drafts.find((d) => d.id === 'draft-evo')).toBeUndefined();
+    });
+
+    it('should create new experience when matchedExperienceId is present but LLM says not better', async () => {
+      // Arrange: 1. Store existing experience
+      const existingExp = {
+        id: 'exp-existing-2',
+        frustrationSignature: 'Some error',
+        failedApproaches: ['Approach A'],
+        successfulApproach: 'Solution A',
+        lessons: ['Lesson A'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 1,
+      };
+      sqliteStore.storeExperience(existingExp);
+
+      // 2. Store draft with matchedExperienceId
+      const draft = makeCandidate({
+        id: 'draft-not-better',
+        matchedExperienceId: 'exp-existing-2',
+        transcriptData: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'Error' },
+            { role: 'assistant', content: 'Fixed' },
+          ],
+          toolCalls: [],
+          errors: [],
+        }),
+      });
+      sqliteStore.storeCandidate(draft);
+
+      // 3. Mock LLM: summarization OK, evolution judge returns isBetter: false
+      const mockProvider = new MockLLMProvider();
+      let callCount = 0;
+      mockProvider.generateCompletion = async () => {
+        callCount++;
+        if (callCount === 1) {
+          return JSON.stringify({
+            frustrationSignature: 'New sig',
+            failedApproaches: ['New approach'],
+            successfulApproach: 'New solution',
+            lessons: ['New lesson'],
+          });
+        }
+        return JSON.stringify({
+          isBetter: false,
+          reasoning: 'The old solution was better',
+          mergedLessons: [],
+          newFailedApproachNote: '',
+        });
+      };
+
+      // Act
+      await runCommand(['review', 'confirm', 'draft-not-better'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider: mockProvider,
+      });
+
+      // Assert: existing experience was NOT modified
+      const existing = sqliteStore.getExperience('exp-existing-2');
+      expect(existing!.revision).toBe(1);
+
+      // Assert: a NEW experience was created with the draft's id
+      const newExp = sqliteStore.getExperience('draft-not-better');
+      expect(newExp).not.toBeNull();
+
+      // Assert: draft was cleaned up
+      const drafts = sqliteStore.getPendingDrafts();
+      expect(drafts.find((d) => d.id === 'draft-not-better')).toBeUndefined();
+    });
+
+    it('should create new experience when matchedExperienceId points to deleted experience', async () => {
+      // Arrange: no existing experience stored for the referenced ID.
+      // The matchedExperienceId references an experience that was since deleted.
+      const draft = makeCandidate({
+        id: 'draft-deleted-ref',
+        matchedExperienceId: 'exp-deleted',
+        transcriptData: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'Error' },
+            { role: 'assistant', content: 'Fixed' },
+          ],
+          toolCalls: [],
+          errors: [],
+        }),
+      });
+      sqliteStore.storeCandidate(draft);
+
+      // Act: use the default mock provider (returns non-JSON completion)
+      await runCommand(['review', 'confirm', 'draft-deleted-ref'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: new experience created (fallback to normal confirm flow)
+      const newExp = sqliteStore.getExperience('draft-deleted-ref');
+      expect(newExp).not.toBeNull();
+
+      // Assert: draft was cleaned up
+      const drafts = sqliteStore.getPendingDrafts();
+      expect(drafts.find((d) => d.id === 'draft-deleted-ref')).toBeUndefined();
+    });
+
+    it('should fallback to new experience when evolution LLM call fails', async () => {
+      // Arrange: 1. Store existing experience
+      const existingExp = {
+        id: 'exp-existing-3',
+        frustrationSignature: 'Error pattern',
+        failedApproaches: ['Approach'],
+        successfulApproach: 'Solution',
+        lessons: ['Lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 1,
+      };
+      sqliteStore.storeExperience(existingExp);
+
+      // 2. Store draft with matchedExperienceId
+      const draft = makeCandidate({
+        id: 'draft-llm-fail',
+        matchedExperienceId: 'exp-existing-3',
+        transcriptData: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'Error' },
+            { role: 'assistant', content: 'Fixed' },
+          ],
+          toolCalls: [],
+          errors: [],
+        }),
+      });
+      sqliteStore.storeCandidate(draft);
+
+      // 3. Mock LLM: first call (summarization) OK, second call (evolution judge) throws
+      const mockProvider = new MockLLMProvider();
+      let callCount = 0;
+      mockProvider.generateCompletion = async () => {
+        callCount++;
+        if (callCount === 1) {
+          return JSON.stringify({
+            frustrationSignature: 'New sig',
+            failedApproaches: [],
+            successfulApproach: 'New solution',
+            lessons: ['New lesson'],
+          });
+        }
+        throw new Error('LLM service unavailable');
+      };
+
+      // Act
+      await runCommand(['review', 'confirm', 'draft-llm-fail'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider: mockProvider,
+      });
+
+      // Assert: existing experience was NOT modified (graceful degradation)
+      const existing = sqliteStore.getExperience('exp-existing-3');
+      expect(existing!.revision).toBe(1);
+
+      // Assert: new experience created as fallback
+      const newExp = sqliteStore.getExperience('draft-llm-fail');
+      expect(newExp).not.toBeNull();
+    });
+
+    it('should demote old successfulApproach to failedApproaches on evolution', async () => {
+      // Arrange: store existing experience with a successful approach
+      // that should be demoted when a better one is found
+      const existingExp = {
+        id: 'exp-demote',
+        frustrationSignature: 'Error X',
+        failedApproaches: ['Failed A'],
+        successfulApproach: 'Old success (to be demoted)',
+        lessons: ['Old lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 1,
+      };
+      sqliteStore.storeExperience(existingExp);
+      const emb = await llmProvider.generateEmbedding('Error X');
+      vectorStore.store('exp-demote', emb, { frustrationSignature: 'Error X' });
+
+      const draft = makeCandidate({
+        id: 'draft-demote',
+        matchedExperienceId: 'exp-demote',
+        transcriptData: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'Error X again' },
+            { role: 'assistant', content: 'Better fix' },
+          ],
+          toolCalls: [],
+          errors: [],
+        }),
+      });
+      sqliteStore.storeCandidate(draft);
+
+      // Mock LLM: summarization + evolution judge both succeed
+      const mockProvider = new MockLLMProvider();
+      let callCount = 0;
+      mockProvider.generateCompletion = async () => {
+        callCount++;
+        if (callCount === 1) {
+          // lessonSummarization: extract fields from new transcript
+          return JSON.stringify({
+            frustrationSignature: 'Error X improved',
+            failedApproaches: ['New failed approach'],
+            successfulApproach: 'Better solution',
+            lessons: ['Better lesson'],
+          });
+        }
+        // evolutionJudge: new is better, old success should be demoted
+        return JSON.stringify({
+          isBetter: true,
+          reasoning: 'Better',
+          mergedLessons: ['Old lesson', 'Better lesson'],
+          newFailedApproachNote: 'Old success was partial fix',
+        });
+      };
+
+      // Act
+      await runCommand(['review', 'confirm', 'draft-demote'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider: mockProvider,
+      });
+
+      // Assert: the evolved experience should have the old successfulApproach
+      // demoted to failedApproaches and the new one set
+      const updated = sqliteStore.getExperience('exp-demote');
+      expect(updated).not.toBeNull();
+      // Old successfulApproach should now be in failedApproaches
+      expect(updated!.failedApproaches).toContain('Old success (to be demoted)');
+      // New successfulApproach should be set
+      expect(updated!.successfulApproach).toBe('Better solution');
+      // Revision should be incremented
+      expect(updated!.revision).toBe(2);
+    });
+  });
+
+  // =========================================================================
+  // 20. list - revision display
+  // =========================================================================
+  describe('list - revision display', () => {
+    it('should show (v2) next to experience ID when revision > 1', async () => {
+      // Arrange: store an experience at revision 2
+      sqliteStore.storeExperience({
+        id: 'exp-v2',
+        frustrationSignature: 'Evolved error',
+        failedApproaches: ['Old approach'],
+        successfulApproach: 'New solution',
+        lessons: ['Evolved lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 2,
+      });
+
+      // Act
+      const { output } = await runCommand(['list'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: output should contain the ID and a (v2) version tag
+      expect(output).toContain('exp-v2');
+      expect(output).toContain('(v2)');
+    });
+
+    it('should NOT show version tag for revision 1', async () => {
+      // Arrange: store an experience at the default revision 1
+      sqliteStore.storeExperience({
+        id: 'exp-v1',
+        frustrationSignature: 'Normal error',
+        failedApproaches: [],
+        successfulApproach: 'Solution',
+        lessons: ['Lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 1,
+      });
+
+      // Act
+      const { output } = await runCommand(['list'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: should show the ID but NOT a (v1) tag
+      expect(output).toContain('exp-v1');
+      expect(output).not.toContain('(v1)');
+    });
+  });
+
+  // =========================================================================
+  // 21. detail - revision display
+  // =========================================================================
+  describe('detail - revision display', () => {
+    it('should show revision number in detail view', async () => {
+      // Arrange: store an experience at revision 3
+      sqliteStore.storeExperience({
+        id: 'exp-detail-rev',
+        frustrationSignature: 'Multi-evolved error',
+        failedApproaches: ['Old approach'],
+        successfulApproach: 'Latest solution',
+        lessons: ['Latest lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 3,
+      });
+
+      // Act
+      const { output } = await runCommand(['detail', 'exp-detail-rev'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: output should contain the revision number
+      expect(output).toContain('exp-detail-rev');
+      expect(output).toMatch(/[Rr]evision.*3|v3/);
+    });
+  });
+
+  // =========================================================================
+  // 22. review list - evolution candidate display
+  // =========================================================================
+  describe('review list - evolution candidate display', () => {
+    it('should show (evolution candidate) when draft has matchedExperienceId', async () => {
+      // Arrange: store a draft with matchedExperienceId set
+      sqliteStore.storeCandidate(makeCandidate({
+        id: 'draft-evo-display',
+        matchedExperienceId: 'exp-some',
+      }));
+
+      // Act
+      const { output } = await runCommand(['review', 'list'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: output should indicate this is an evolution candidate
+      expect(output).toContain('draft-evo-display');
+      expect(output).toContain('(evolution candidate)');
+    });
+
+    it('should NOT show (evolution candidate) when draft has no matchedExperienceId', async () => {
+      // Arrange: store a draft without matchedExperienceId
+      sqliteStore.storeCandidate(makeCandidate({
+        id: 'draft-normal-display',
+      }));
+
+      // Act
+      const { output } = await runCommand(['review', 'list'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: should show draft ID but NOT the evolution candidate tag
+      expect(output).toContain('draft-normal-display');
+      expect(output).not.toContain('(evolution candidate)');
+    });
+  });
+
+  // =========================================================================
+  // 23. history command: show revision history for an experience
+  // =========================================================================
+  describe('history command', () => {
+    it('should show revision history for an experience', async () => {
+      // Arrange: store experience at revision 2 and its revision 1 snapshot
+      sqliteStore.storeExperience({
+        id: 'exp-history',
+        frustrationSignature: 'Current state',
+        failedApproaches: ['approach 1', 'old success'],
+        successfulApproach: 'New solution',
+        lessons: ['New lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 2,
+      });
+
+      sqliteStore.storeRevision({
+        id: 'rev-001',
+        experienceId: 'exp-history',
+        revision: 1,
+        frustrationSignature: 'Original state',
+        failedApproaches: ['approach 1'],
+        successfulApproach: 'Old solution',
+        lessons: ['Old lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+      });
+
+      // Act
+      const { output } = await runCommand(['history', 'exp-history'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: output should contain revision history details
+      expect(output).toContain('exp-history');
+      expect(output).toContain('v1');
+      expect(output).toContain('Original state');
+      expect(output).toContain('Old solution');
+    });
+
+    it('should show error message for non-existent experience', async () => {
+      // Arrange: no experience stored
+
+      // Act
+      const { output, errorOutput } = await runCommand(['history', 'non-existent'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: should indicate the experience was not found
+      const combinedOutput = (output + errorOutput).toLowerCase();
+      expect(combinedOutput).toContain('not found');
+    });
+
+    it('should show message when no revision history exists', async () => {
+      // Arrange: store experience at revision 1 (no revisions table entries)
+      sqliteStore.storeExperience({
+        id: 'exp-no-history',
+        frustrationSignature: 'Some error',
+        failedApproaches: [],
+        successfulApproach: 'Solution',
+        lessons: ['Lesson'],
+        createdAt: '2026-01-01T00:00:00Z',
+        revision: 1,
+      });
+
+      // Act
+      const { output } = await runCommand(['history', 'exp-no-history'], {
+        sqliteStore,
+        vectorStore,
+        llmProvider,
+      });
+
+      // Assert: should indicate no revision history
+      expect(output).toContain('No revision history');
     });
   });
 });

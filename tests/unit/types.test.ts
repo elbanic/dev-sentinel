@@ -26,6 +26,7 @@ import {
   ToolCallEntrySchema,
   TranscriptDataSchema,
   FailureExperienceSchema,
+  ExperienceRevisionSchema,
   AutoMemoryCandidateSchema,
   FrustrationAnalysisSchema,
   MatchResultSchema,
@@ -349,6 +350,67 @@ describe('FailureExperienceSchema', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('revision field', () => {
+    it('should default revision to 1 when not provided', () => {
+      const input = {
+        id: 'exp-001',
+        frustrationSignature: 'Test error',
+        failedApproaches: [],
+        lessons: [],
+        createdAt: '2026-02-16T10:00:00Z',
+      };
+      const result = FailureExperienceSchema.parse(input);
+      expect(result.revision).toBe(1);
+    });
+
+    it('should accept explicit revision value', () => {
+      const input = {
+        id: 'exp-001',
+        frustrationSignature: 'Test error',
+        failedApproaches: [],
+        lessons: [],
+        createdAt: '2026-02-16T10:00:00Z',
+        revision: 3,
+      };
+      const result = FailureExperienceSchema.parse(input);
+      expect(result.revision).toBe(3);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4b. ExperienceRevisionSchema
+// ---------------------------------------------------------------------------
+describe('ExperienceRevisionSchema', () => {
+  const validRevision = {
+    id: 'rev-001',
+    experienceId: 'exp-001',
+    revision: 1,
+    frustrationSignature: 'Test error',
+    failedApproaches: ['approach 1'],
+    successfulApproach: 'solution',
+    lessons: ['lesson 1'],
+    createdAt: '2026-02-16T10:00:00Z',
+  };
+
+  it('should parse a valid revision', () => {
+    const result = ExperienceRevisionSchema.parse(validRevision);
+    expect(result.id).toBe('rev-001');
+    expect(result.experienceId).toBe('exp-001');
+    expect(result.revision).toBe(1);
+  });
+
+  it('should reject revision less than 1', () => {
+    const result = ExperienceRevisionSchema.safeParse({ ...validRevision, revision: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  it('should allow optional successfulApproach', () => {
+    const { successfulApproach, ...withoutSuccess } = validRevision;
+    const result = ExperienceRevisionSchema.parse(withoutSuccess);
+    expect(result.successfulApproach).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -388,6 +450,17 @@ describe('AutoMemoryCandidateSchema', () => {
       const { successfulApproach, ...withoutSuccess } = validCandidate;
       const result = AutoMemoryCandidateSchema.parse(withoutSuccess);
       expect(result.successfulApproach).toBeUndefined();
+    });
+
+    it('should parse with matchedExperienceId', () => {
+      const input = { ...validCandidate, matchedExperienceId: 'exp-001' };
+      const result = AutoMemoryCandidateSchema.parse(input);
+      expect(result.matchedExperienceId).toBe('exp-001');
+    });
+
+    it('should parse without matchedExperienceId (optional)', () => {
+      const result = AutoMemoryCandidateSchema.parse(validCandidate);
+      expect(result.matchedExperienceId).toBeUndefined();
     });
   });
 
@@ -919,6 +992,65 @@ describe('SentinelSettingsSchema', () => {
       expect(result).toHaveProperty('recall');
       expect(result.enabled).toBe(true);
       expect(result.debug).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // thinkingModel field tests
+  // -------------------------------------------------------------------------
+  describe('thinkingModel field', () => {
+    it('should parse ollama settings with thinkingModel', () => {
+      const input = {
+        llm: {
+          provider: 'ollama',
+          ollama: {
+            thinkingModel: 'qwen3:8b',
+          },
+        },
+        storage: {},
+      };
+      const result = SentinelSettingsSchema.parse(input);
+      expect(result.llm.ollama.thinkingModel).toBe('qwen3:8b');
+    });
+
+    it('should parse ollama settings without thinkingModel (optional)', () => {
+      const input = {
+        llm: {
+          provider: 'ollama',
+          ollama: {},
+        },
+        storage: {},
+      };
+      const result = SentinelSettingsSchema.parse(input);
+      expect(result.llm.ollama.thinkingModel).toBeUndefined();
+    });
+
+    it('should parse bedrock settings with thinkingModel', () => {
+      const input = {
+        llm: {
+          provider: 'bedrock',
+          ollama: {},
+          bedrock: {
+            thinkingModel: 'us.anthropic.claude-opus-4-20250514-v1:0',
+          },
+        },
+        storage: {},
+      };
+      const result = SentinelSettingsSchema.parse(input);
+      expect(result.llm.bedrock?.thinkingModel).toBe('us.anthropic.claude-opus-4-20250514-v1:0');
+    });
+
+    it('should parse bedrock settings without thinkingModel (optional)', () => {
+      const input = {
+        llm: {
+          provider: 'bedrock',
+          ollama: {},
+          bedrock: {},
+        },
+        storage: {},
+      };
+      const result = SentinelSettingsSchema.parse(input);
+      expect(result.llm.bedrock?.thinkingModel).toBeUndefined();
     });
   });
 

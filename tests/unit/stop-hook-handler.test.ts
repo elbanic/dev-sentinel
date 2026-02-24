@@ -13,7 +13,7 @@
  *   4. Always return '{"decision":"approve"}'
  *   5. NEVER throw
  *
- * Test points (11 total):
+ * Test points (11 + 3 = 14 total):
  *   1.  flag absent -> approve immediately, parseTranscriptFile NOT called
  *   2.  flag = 'frustrated' -> approve immediately, parseTranscriptFile NOT called
  *   3.  flag = 'capture' -> full pipeline -> approve (raw transcript stored)
@@ -25,6 +25,9 @@
  *   9.  storeCandidate throws -> approve (graceful), clearFlag still called
  *   10. dedup: same session already has pending draft -> skip storeCandidate
  *   11. getFlag throws -> approve (graceful)
+ *   12. matchedExperienceId tagging: flag has matched_experience_id -> included in storeCandidate
+ *   13. matchedExperienceId tagging: flag has no matched_experience_id -> not included
+ *   14. matchedExperienceId tagging: flag matched_experience_id is null -> not included
  */
 
 import { handleStop } from '../../src/hook/stop-hook-handler';
@@ -88,12 +91,14 @@ function makeFlagRow(overrides?: {
   status?: string;
   flagged_at?: string;
   updated_at?: string;
+  matched_experience_id?: string | null;
 }) {
   return {
     session_id: 'session-001',
     status: 'frustrated',
     flagged_at: '2026-02-16T12:00:00Z',
     updated_at: '2026-02-16T12:00:00Z',
+    matched_experience_id: null,
     ...overrides,
   };
 }
@@ -971,6 +976,75 @@ describe('StopHookHandler - handleStop', () => {
 
       expect(result).toBe(APPROVE_RESPONSE);
       expect(mockedParseTranscriptFile).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // matchedExperienceId tagging in candidate
+  // =========================================================================
+  describe('matchedExperienceId tagging', () => {
+    it('should include matchedExperienceId in storeCandidate when flag has matched_experience_id', async () => {
+      const transcriptData = makeTranscriptData();
+
+      mockStore.getFlag.mockReturnValue(
+        makeFlagRow({ status: 'capture', session_id: 'session-evo', matched_experience_id: 'exp-existing-001' })
+      );
+      mockedParseTranscriptFile.mockReturnValue(transcriptData);
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleStop({
+        sessionId: 'session-evo',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
+      const storedArg = mockStore.storeCandidate.mock.calls[0][0];
+      expect(storedArg.matchedExperienceId).toBe('exp-existing-001');
+    });
+
+    it('should not include matchedExperienceId when flag has no matched_experience_id', async () => {
+      const transcriptData = makeTranscriptData();
+
+      mockStore.getFlag.mockReturnValue(
+        makeFlagRow({ status: 'capture', session_id: 'session-no-evo' })
+      );
+      mockedParseTranscriptFile.mockReturnValue(transcriptData);
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleStop({
+        sessionId: 'session-no-evo',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
+      const storedArg = mockStore.storeCandidate.mock.calls[0][0];
+      expect(storedArg.matchedExperienceId).toBeUndefined();
+    });
+
+    it('should not include matchedExperienceId when flag matched_experience_id is null', async () => {
+      const transcriptData = makeTranscriptData();
+
+      mockStore.getFlag.mockReturnValue({
+        ...makeFlagRow({ status: 'capture', session_id: 'session-null-evo' }),
+        matched_experience_id: null,
+      });
+      mockedParseTranscriptFile.mockReturnValue(transcriptData);
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleStop({
+        sessionId: 'session-null-evo',
+        transcriptPath: '/tmp/transcript.jsonl',
+        llmProvider: mockLlmProvider,
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.storeCandidate).toHaveBeenCalledTimes(1);
+      const storedArg = mockStore.storeCandidate.mock.calls[0][0];
+      expect(storedArg.matchedExperienceId).toBeUndefined();
     });
   });
 });

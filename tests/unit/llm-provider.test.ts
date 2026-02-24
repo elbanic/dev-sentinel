@@ -326,6 +326,79 @@ describe('LocalLLMProvider', () => {
 
   // NOTE: No HTTP call tests here. LocalLLMProvider makes real HTTP calls
   // to Ollama and those are integration test concerns, not unit test concerns.
+
+  describe('thinkingModel', () => {
+    let fetchSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ response: '{}' }),
+      } as Response);
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
+    it('should use thinkingModel for think:true when thinkingModel is provided', async () => {
+      const provider = new LocalLLMProvider(
+        'http://localhost:11434', 'qwen3:4b', 'qwen3-embedding:0.6b', 'qwen3:8b'
+      );
+
+      await provider.generateCompletion('system', 'user', { think: true });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.model).toBe('qwen3:8b');
+    });
+
+    it('should fall back to completionModel for think:true when thinkingModel is not provided', async () => {
+      const provider = new LocalLLMProvider(
+        'http://localhost:11434', 'qwen3:4b', 'qwen3-embedding:0.6b'
+      );
+
+      await provider.generateCompletion('system', 'user', { think: true });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.model).toBe('qwen3:4b');
+    });
+
+    it('should always use completionModel for think:false even when thinkingModel is provided', async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: { content: '{}' } }),
+      } as Response);
+
+      const provider = new LocalLLMProvider(
+        'http://localhost:11434', 'qwen3:4b', 'qwen3-embedding:0.6b', 'qwen3:8b'
+      );
+
+      await provider.generateCompletion('system', 'user', { think: false });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.model).toBe('qwen3:4b');
+    });
+
+    it('should always use completionModel when no options provided even when thinkingModel is set', async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: { content: '{}' } }),
+      } as Response);
+
+      const provider = new LocalLLMProvider(
+        'http://localhost:11434', 'qwen3:4b', 'qwen3-embedding:0.6b', 'qwen3:8b'
+      );
+
+      await provider.generateCompletion('system', 'user');
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.model).toBe('qwen3:4b');
+    });
+  });
 });
 
 // =============================================================================
@@ -407,7 +480,7 @@ describe('PROMPTS', () => {
     it('should export exactly the expected prompt keys', () => {
       const keys = Object.keys(PROMPTS).sort();
       expect(keys).toEqual(
-        ['frustrationAnalysis', 'lessonSummarization', 'ragJudge'].sort()
+        ['evolutionJudge', 'frustrationAnalysis', 'lessonSummarization', 'ragJudge'].sort()
       );
     });
   });
