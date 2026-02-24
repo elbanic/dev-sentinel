@@ -480,7 +480,7 @@ describe('PROMPTS', () => {
     it('should export exactly the expected prompt keys', () => {
       const keys = Object.keys(PROMPTS).sort();
       expect(keys).toEqual(
-        ['evolutionJudge', 'frustrationAnalysis', 'lessonSummarization', 'ragJudge'].sort()
+        ['evolutionJudge', 'frustrationAnalysis', 'lessonSummarization', 'patternAnalysis', 'patternTranslation', 'ragJudge'].sort()
       );
     });
   });

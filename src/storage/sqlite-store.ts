@@ -59,6 +59,25 @@ interface HookErrorRow {
   last_occurred: string;
 }
 
+interface PatternAnalysisRow {
+  id: string;
+  analysis_json: string;
+  experience_count: number;
+  created_at: string;
+}
+
+interface PatternTranslationRow {
+  analysis_id: string;
+  language: string;
+  translated_json: string;
+  created_at: string;
+}
+
+interface FrustrationTrendRow {
+  date: string;
+  count: number;
+}
+
 export class SqliteStore {
   private db: Database.Database;
 
@@ -166,6 +185,24 @@ export class SqliteStore {
       );
       CREATE INDEX IF NOT EXISTS idx_hook_errors_component_created
         ON hook_errors(component, created_at);
+    `);
+
+    // Create pattern_analyses and pattern_translations tables
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS pattern_analyses (
+        id TEXT PRIMARY KEY,
+        analysis_json TEXT NOT NULL,
+        experience_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS pattern_translations (
+        analysis_id TEXT NOT NULL,
+        language TEXT NOT NULL,
+        translated_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (analysis_id, language)
+      );
     `);
   }
 
@@ -452,6 +489,61 @@ export class SqliteStore {
     return result.changes;
   }
 
+  // =========================================================================
+  // pattern_analyses + pattern_translations
+  // =========================================================================
+
+  storePatternAnalysis(id: string, analysisJson: string, experienceCount: number): void {
+    this.ensureOpen();
+    this.db
+      .prepare('INSERT INTO pattern_analyses (id, analysis_json, experience_count) VALUES (?, ?, ?)')
+      .run(id, analysisJson, experienceCount);
+  }
+
+  getLatestPatternAnalysis(): PatternAnalysisRow | null {
+    this.ensureOpen();
+    const row = this.db
+      .prepare('SELECT id, analysis_json, experience_count, created_at FROM pattern_analyses ORDER BY created_at DESC, rowid DESC LIMIT 1')
+      .get() as PatternAnalysisRow | undefined;
+    return row ?? null;
+  }
+
+  storePatternTranslation(analysisId: string, language: string, translatedJson: string): void {
+    this.ensureOpen();
+    this.db
+      .prepare('INSERT OR REPLACE INTO pattern_translations (analysis_id, language, translated_json) VALUES (?, ?, ?)')
+      .run(analysisId, language, translatedJson);
+  }
+
+  getPatternTranslation(analysisId: string, language: string): PatternTranslationRow | null {
+    this.ensureOpen();
+    const row = this.db
+      .prepare('SELECT analysis_id, language, translated_json, created_at FROM pattern_translations WHERE analysis_id = ? AND language = ?')
+      .get(analysisId, language) as PatternTranslationRow | undefined;
+    return row ?? null;
+  }
+
+  deletePatternTranslations(analysisId: string): void {
+    this.ensureOpen();
+    this.db
+      .prepare('DELETE FROM pattern_translations WHERE analysis_id = ?')
+      .run(analysisId);
+  }
+
+  getFrustrationTrend(days: number): FrustrationTrendRow[] {
+    this.ensureOpen();
+    return this.db
+      .prepare(`
+        SELECT date(created_at) as date, COUNT(*) as count
+        FROM session_turns
+        WHERE json_extract(analysis, '$.type') = 'frustrated'
+          AND created_at >= datetime('now', '-' || ? || ' days')
+        GROUP BY date(created_at)
+        ORDER BY date ASC
+      `)
+      .all(days) as FrustrationTrendRow[];
+  }
+
   resetAll(): void {
     this.ensureOpen();
     this.db.exec('DELETE FROM experiences');
@@ -461,6 +553,8 @@ export class SqliteStore {
     this.db.exec('DELETE FROM session_advices');
     this.db.exec('DELETE FROM experience_revisions');
     this.db.exec('DELETE FROM hook_errors');
+    this.db.exec('DELETE FROM pattern_analyses');
+    this.db.exec('DELETE FROM pattern_translations');
   }
 
   // =========================================================================

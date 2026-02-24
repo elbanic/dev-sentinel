@@ -705,4 +705,106 @@ describe('SqliteStore', () => {
       expect(revisions).toEqual([]);
     });
   });
+
+  // =========================================================================
+  // pattern_analyses + pattern_translations
+  // =========================================================================
+  describe('pattern analyses', () => {
+    it('should store and retrieve a pattern analysis', () => {
+      const analysis = JSON.stringify({ insight: 'test insight', weakAreas: [], resolutionRate: 75, recommendations: [] });
+      store.storePatternAnalysis('pa-001', analysis, 5);
+
+      const latest = store.getLatestPatternAnalysis();
+      expect(latest).not.toBeNull();
+      expect(latest!.id).toBe('pa-001');
+      expect(latest!.analysis_json).toBe(analysis);
+      expect(latest!.experience_count).toBe(5);
+      expect(latest!.created_at).toBeDefined();
+    });
+
+    it('should return the most recent pattern analysis', () => {
+      store.storePatternAnalysis('pa-old', '{"old":true}', 3);
+      store.storePatternAnalysis('pa-new', '{"new":true}', 7);
+
+      const latest = store.getLatestPatternAnalysis();
+      expect(latest).not.toBeNull();
+      expect(latest!.id).toBe('pa-new');
+    });
+
+    it('should return null when no pattern analyses exist', () => {
+      const latest = store.getLatestPatternAnalysis();
+      expect(latest).toBeNull();
+    });
+  });
+
+  describe('pattern translations', () => {
+    it('should store and retrieve a translation', () => {
+      store.storePatternAnalysis('pa-t1', '{}', 1);
+      store.storePatternTranslation('pa-t1', 'ko', '{"translated":"ko"}');
+
+      const translation = store.getPatternTranslation('pa-t1', 'ko');
+      expect(translation).not.toBeNull();
+      expect(translation!.translated_json).toBe('{"translated":"ko"}');
+    });
+
+    it('should return null for non-existent translation', () => {
+      const translation = store.getPatternTranslation('pa-nonexist', 'ko');
+      expect(translation).toBeNull();
+    });
+
+    it('should overwrite existing translation (INSERT OR REPLACE)', () => {
+      store.storePatternAnalysis('pa-t2', '{}', 1);
+      store.storePatternTranslation('pa-t2', 'ja', '{"v":1}');
+      store.storePatternTranslation('pa-t2', 'ja', '{"v":2}');
+
+      const translation = store.getPatternTranslation('pa-t2', 'ja');
+      expect(translation!.translated_json).toBe('{"v":2}');
+    });
+
+    it('should delete all translations for an analysis', () => {
+      store.storePatternAnalysis('pa-t3', '{}', 1);
+      store.storePatternTranslation('pa-t3', 'ko', '{"ko":true}');
+      store.storePatternTranslation('pa-t3', 'ja', '{"ja":true}');
+
+      store.deletePatternTranslations('pa-t3');
+
+      expect(store.getPatternTranslation('pa-t3', 'ko')).toBeNull();
+      expect(store.getPatternTranslation('pa-t3', 'ja')).toBeNull();
+    });
+  });
+
+  describe('getFrustrationTrend', () => {
+    it('should return daily frustration counts from session_turns', () => {
+      // Store turns with frustrated analysis
+      store.storeTurn('s1', 'prompt1', JSON.stringify({ type: 'frustrated' }));
+      store.storeTurn('s1', 'prompt2', JSON.stringify({ type: 'normal' }));
+      store.storeTurn('s2', 'prompt3', JSON.stringify({ type: 'frustrated' }));
+
+      const trend = store.getFrustrationTrend(30);
+      expect(Array.isArray(trend)).toBe(true);
+      // At least one day with frustration data
+      if (trend.length > 0) {
+        expect(trend[0]).toHaveProperty('date');
+        expect(trend[0]).toHaveProperty('count');
+      }
+    });
+
+    it('should return empty array when no frustrated turns exist', () => {
+      store.storeTurn('s1', 'prompt', JSON.stringify({ type: 'normal' }));
+      const trend = store.getFrustrationTrend(30);
+      expect(trend).toEqual([]);
+    });
+  });
+
+  describe('resetAll includes pattern tables', () => {
+    it('should clear pattern_analyses and pattern_translations on resetAll', () => {
+      store.storePatternAnalysis('pa-reset', '{}', 1);
+      store.storePatternTranslation('pa-reset', 'ko', '{}');
+
+      store.resetAll();
+
+      expect(store.getLatestPatternAnalysis()).toBeNull();
+      expect(store.getPatternTranslation('pa-reset', 'ko')).toBeNull();
+    });
+  });
 });

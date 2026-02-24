@@ -173,7 +173,22 @@ export interface LLMProvider {
 }
 
 // ---------------------------------------------------------------------------
-// 10. Persistent Error Tracking
+// 10. PatternAnalysisResultSchema
+// ---------------------------------------------------------------------------
+export const PatternAnalysisResultSchema = z.object({
+  insight: z.string(),
+  weakAreas: z.array(z.object({
+    category: z.string(),
+    count: z.number().int().min(0),
+    description: z.string(),
+  })),
+  resolutionRate: z.number().min(0).max(100),
+});
+
+export type PatternAnalysisResult = z.infer<typeof PatternAnalysisResultSchema>;
+
+// ---------------------------------------------------------------------------
+// 11. Persistent Error Tracking
 // ---------------------------------------------------------------------------
 export type HookErrorComponent = 'llm' | 'database' | 'vector' | 'transcript';
 

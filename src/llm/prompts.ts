@@ -90,4 +90,27 @@ Respond with a JSON object containing:
 - reasoning: string — your explanation for the judgment
 - mergedLessons: string[] — combined lessons from both old and new, deduplicated and refined
 - newFailedApproachNote: string — if the old solution is being superseded, describe it as a failed approach note (e.g., "Previous fix X was partial because Y"). Empty string if not better.`,
+  patternAnalysis: `You are a developer experience pattern analyst. Given a collection of confirmed failure experiences and daily frustration trend data, perform a holistic analysis to discover patterns, weak areas, and actionable insights.
+
+Important: Do NOT use prescribed categories. Discover the categories organically from the actual data. Group related experiences by the themes you observe (e.g., "Build System", "Type System", "Testing Infrastructure", "API Integration", etc.).
+
+Respond with a JSON object containing:
+
+- insight (string): A 2-4 sentence narrative summary of the developer's overall struggle patterns, trends, and growth areas. Write as if advising the developer directly. Use markdown formatting for emphasis (e.g., **bold** for key phrases).
+
+- weakAreas (array, max 5 entries): The top weakness categories, sorted by count descending. Each entry has:
+  - category (string): A discovered category label (keep concise, 2-3 words)
+  - count (number): How many experiences fall into this category
+  - description (string): Brief explanation of why this area is problematic
+
+- resolutionRate (number): Percentage (0-100) of experiences that have a successful resolution (non-null successfulApproach). Calculate from the data provided.`,
+
+  patternTranslation: `You are a professional translator for technical developer content. Translate the given JSON values into the target language specified in the user message.
+
+Rules:
+- Translate ONLY the string values, keep all JSON keys unchanged
+- Keep technical terms (e.g., Docker, TypeScript, Jest, API, Git) in English
+- Keep code snippets, file paths, and command names in English
+- Maintain the same JSON structure exactly
+- Output valid JSON only, no additional text`,
 } as const;

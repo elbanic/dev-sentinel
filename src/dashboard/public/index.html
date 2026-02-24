@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dev Sentinel</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    :root {
+      --card-bg: var(--pico-card-background-color);
+    }
+    body { padding-top: 0; }
+    nav { margin-bottom: 0; }
+    nav ul { margin-bottom: 0; }
+    .tab-bar { border-bottom: 2px solid var(--pico-muted-border-color); margin-bottom: 1.5rem; }
+    .tab-bar a {
+      display: inline-block;
+      padding: 0.75rem 1.25rem;
+      text-decoration: none;
+      color: var(--pico-muted-color);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      font-weight: 500;
+    }
+    .tab-bar a.active {
+      color: var(--pico-primary);
+      border-bottom-color: var(--pico-primary);
+    }
+    .tab-bar a .badge {
+      background: var(--pico-primary);
+      color: var(--pico-primary-inverse);
+      border-radius: 999px;
+      padding: 0.1rem 0.5rem;
+      font-size: 0.75rem;
+      margin-left: 0.3rem;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Stat cards grid */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      text-align: center;
+      padding: 1.5rem 1rem;
+      cursor: default;
+    }
+    .stat-card.clickable { cursor: pointer; }
+    .stat-card.clickable:hover { opacity: 0.85; }
+    .stat-card .stat-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 0.25rem;
+    }
+    .stat-card .stat-label {
+      font-size: 0.9rem;
+      color: var(--pico-muted-color);
+    }
+    .stat-card .stat-sub {
+      font-size: 0.8rem;
+      color: var(--pico-muted-color);
+      margin-top: 0.25rem;
+    }
+
+    /* Experience / Draft lists */
+    .list-item {
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: var(--pico-border-radius);
+      margin-bottom: 0.5rem;
+      overflow: hidden;
+    }
+    .list-item-header {
+      display: flex;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      gap: 0.75rem;
+    }
+    .list-item-header:hover { background: var(--pico-card-background-color); }
+    .list-item-header .arrow {
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .list-item.expanded .arrow { transform: rotate(90deg); }
+    .list-item-header .title { flex: 1; font-weight: 500; }
+    .list-item-header .meta {
+      font-size: 0.85rem;
+      color: var(--pico-muted-color);
+      white-space: nowrap;
+    }
+    .list-item-detail {
+      display: none;
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+      background: var(--pico-card-background-color);
+    }
+    .list-item.expanded .list-item-detail { display: block; }
+
+    .detail-section { margin-bottom: 1rem; font-size: 0.85rem; }
+    .detail-section h4 {
+      font-size: 0.85rem;
+      color: var(--pico-muted-color);
+      text-transform: uppercase;
+      margin-bottom: 0.4rem;
+    }
+
+    /* Transcript preview */
+    .transcript-box {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: var(--pico-border-radius);
+      padding: 0.75rem;
+      font-size: 0.85rem;
+      font-family: var(--pico-font-family-monospace, monospace);
+      white-space: pre-wrap;
+      background: var(--pico-background-color);
+    }
+
+    /* Sort buttons */
+    .sort-bar { margin-bottom: 1rem; }
+    .sort-bar button {
+      font-size: 0.85rem;
+      padding: 0.3rem 0.75rem;
+      margin-right: 0.3rem;
+    }
+    .sort-bar button.active { font-weight: 700; }
+
+    /* Evolution badge */
+    .evo-badge {
+      display: inline-block;
+      background: var(--pico-primary);
+      color: var(--pico-primary-inverse);
+      border-radius: var(--pico-border-radius);
+      padding: 0.2rem 0.6rem;
+      font-size: 0.8rem;
+      margin-bottom: 0.75rem;
+    }
+
+    /* Revision timeline */
+    .revision-timeline {
+      border-left: 2px solid var(--pico-muted-border-color);
+      padding-left: 1rem;
+      margin-top: 0.5rem;
+    }
+    .revision-entry {
+      margin-bottom: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .revision-entry .rev-label {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .revision-entry .rev-date {
+      color: var(--pico-muted-color);
+      margin-right: 0.5rem;
+    }
+
+    /* Confirm result */
+    .confirm-result {
+      padding: 0.75rem 1rem;
+      border-radius: var(--pico-border-radius);
+      margin-top: 0.5rem;
+    }
+    .confirm-result.success { background: #1a3a2a; color: #7dd3a8; }
+    .confirm-result.error { background: #3a1a1a; color: #d37d7d; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--pico-muted-color);
+    }
+
+    /* Draft detail toggle */
+    .draft-detail-toggle {
+      display: inline-block;
+      font-size: 0.85rem;
+      margin-bottom: 0.75rem;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .draft-detail-body { margin-bottom: 0.5rem; }
+
+    /* Action buttons row */
+    .action-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .action-row button { font-size: 0.85rem; }
+
+    /* Loading */
+    .loading-overlay {
+      text-align: center;
+      padding: 2rem;
+      color: var(--pico-muted-color);
+    }
+
+    /* Patterns tab */
+    .patterns-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .patterns-header h3 { margin: 0; flex-shrink: 0; }
+    .patterns-header select {
+      width: auto;
+      padding: 0.3rem 0.6rem;
+      font-size: 0.85rem;
+      margin: 0;
+    }
+    .patterns-header button { margin: 0; font-size: 0.85rem; white-space: nowrap; }
+    .patterns-meta {
+      font-size: 0.8rem;
+      color: var(--pico-muted-color);
+      margin-bottom: 1.5rem;
+    }
+    .insight-card {
+      padding: 1.25rem;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: var(--pico-border-radius);
+      background: var(--pico-card-background-color);
+      white-space: pre-wrap;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+      font-size: 0.95rem;
+    }
+    .patterns-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    @media (max-width: 768px) {
+      .patterns-grid { grid-template-columns: 1fr; }
+    }
+    .patterns-grid article { padding: 1rem; margin: 0; }
+    .patterns-grid h4 {
+      font-size: 0.85rem;
+      color: var(--pico-muted-color);
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+    .weak-area-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .weak-area-label { width: 120px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+    .weak-area-bar-bg {
+      flex: 1;
+      height: 18px;
+      background: var(--pico-muted-border-color);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .weak-area-bar {
+      height: 100%;
+      background: var(--pico-primary);
+      border-radius: 3px;
+      min-width: 4px;
+    }
+    .weak-area-count { width: 30px; text-align: right; font-weight: 600; flex-shrink: 0; }
+    .trend-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 80px;
+    }
+    .trend-bar {
+      flex: 1;
+      background: var(--pico-primary);
+      border-radius: 2px 2px 0 0;
+      min-width: 4px;
+      min-height: 2px;
+      position: relative;
+    }
+    .trend-bar:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      background: var(--pico-card-background-color);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .trend-empty {
+      text-align: center;
+      color: var(--pico-muted-color);
+      font-size: 0.85rem;
+      padding: 1.5rem 0;
+    }
+    .resolution-bar-bg {
+      width: 100%;
+      height: 24px;
+      background: var(--pico-muted-border-color);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 0.5rem;
+    }
+    .resolution-bar {
+      height: 100%;
+      background: #4ade80;
+      border-radius: 4px;
+    }
+    .resolution-text { font-size: 1.5rem; font-weight: 700; }
+
+    /* Tab info line */
+    .tab-info {
+      font-size: 0.8rem;
+      color: #b5a642;
+      background: #b5a64210;
+      border: 1px solid #b5a64230;
+      border-radius: var(--pico-border-radius);
+      padding: 0.5rem 0.75rem;
+      margin-bottom: 1.25rem;
+      line-height: 1.4;
+    }
+
+    /* System health indicator */
+    .health-icon {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      vertical-align: middle;
+    }
+    .health-green { background: #4ade80; box-shadow: 0 0 6px #4ade8066; }
+    .health-yellow { background: #facc15; box-shadow: 0 0 6px #facc1566; }
+    .health-red { background: #f87171; box-shadow: 0 0 6px #f8717166; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <nav>
+      <ul><li><strong>Dev Sentinel Dashboard</strong></li></ul>
+    </nav>
+
+    <div class="tab-bar" id="tab-bar">
+      <a href="#overview" class="active" data-tab="overview">Overview</a>
+      <a href="#experiences" data-tab="experiences">Experiences</a>
+      <a href="#drafts" data-tab="drafts">Drafts <span class="badge" id="drafts-badge" style="display:none"></span></a>
+      <a href="#patterns" data-tab="patterns">Patterns</a>
+    </div>
+
+    <!-- ==================== Overview Tab ==================== -->
+    <section id="tab-overview" class="tab-content active">
+      <div class="tab-info">At-a-glance summary of your Sentinel data: confirmed experiences, pending drafts, and system health.</div>
+      <div class="stat-grid">
+        <article class="stat-card clickable" id="card-experiences" onclick="switchTab('experiences')">
+          <div class="stat-value" id="stat-experiences">-</div>
+          <div class="stat-label">Experiences</div>
+          <div class="stat-sub" id="stat-evolved"></div>
+        </article>
+        <article class="stat-card clickable" id="card-drafts" onclick="switchTab('drafts')">
+          <div class="stat-value" id="stat-drafts">-</div>
+          <div class="stat-label">Pending Drafts</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-value">---</div>
+          <div class="stat-label">Advice Effect.</div>
+          <div class="stat-sub">(coming soon)</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-value" id="stat-health"><span class="health-icon"></span></div>
+          <div class="stat-label">System Health</div>
+          <div class="stat-sub" id="stat-health-sub"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ==================== Experiences Tab ==================== -->
+    <section id="tab-experiences" class="tab-content">
+      <div class="tab-info">Confirmed failure experiences extracted from past sessions. Each contains the problem, failed attempts, solution, and lessons learned.</div>
+      <div class="sort-bar">
+        <span>Sort: </span>
+        <button class="outline active" data-sort="recent" onclick="sortExperiences('recent')">Recent</button>
+        <button class="outline" data-sort="revised" onclick="sortExperiences('revised')">Most Revised</button>
+        <button class="outline" data-sort="alpha" onclick="sortExperiences('alpha')">Alphabetical</button>
+      </div>
+      <div id="experiences-list"></div>
+    </section>
+
+    <!-- ==================== Drafts Tab ==================== -->
+    <section id="tab-drafts" class="tab-content">
+      <div class="tab-info">Unanalyzed draft captures from sessions where frustration was detected. These contain raw transcripts only &mdash; confirm to run LLM analysis and extract structured experiences.</div>
+      <div id="drafts-list"></div>
+    </section>
+
+    <!-- ==================== Patterns Tab ==================== -->
+    <section id="tab-patterns" class="tab-content">
+      <div class="tab-info">On-demand LLM analysis of your confirmed experiences. Discovers weak areas, frustration trends, and resolution rates. Supports translation to other languages.</div>
+      <div class="patterns-header">
+        <h3>Patterns</h3>
+        <select id="patterns-lang" onchange="onPatternLangChange(this.value)">
+          <option value="en">English</option>
+          <option value="ko">Korean</option>
+          <option value="ja">Japanese</option>
+          <option value="zh">Chinese</option>
+          <option value="es">Spanish</option>
+        </select>
+        <button class="primary" id="btn-analyze" onclick="runAnalysis()">New Analyze</button>
+      </div>
+      <div class="patterns-meta" id="patterns-meta"></div>
+      <div id="patterns-content">
+        <div class="empty-state">No analysis yet. Click "New Analyze" to discover patterns in your experiences.</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // =====================================================================
+    // State
+    // =====================================================================
+    let overviewData = null;
+    let experiencesData = [];
+    let draftsData = [];
+    let currentSort = 'recent';
+    let patternsData = null;
+    let patternsTrend = [];
+    let currentPatternLang = 'en';
+
+    // =====================================================================
+    // Tab Navigation
+    // =====================================================================
+    function switchTab(name) {
+      document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.tab-bar a').forEach(a => a.classList.remove('active'));
+      const section = document.getElementById('tab-' + name);
+      const link = document.querySelector('.tab-bar a[data-tab="' + name + '"]');
+      if (section) section.classList.add('active');
+      if (link) link.classList.add('active');
+      window.location.hash = name;
+
+      // Load data when switching tabs
+      if (name === 'overview') loadOverview();
+      if (name === 'experiences') loadExperiences();
+      if (name === 'drafts') loadDrafts();
+      if (name === 'patterns') loadPatterns();
+    }
+
+    document.querySelectorAll('.tab-bar a').forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        switchTab(a.dataset.tab);
+      });
+    });
+
+    // Handle initial hash
+    function initFromHash() {
+      const hash = window.location.hash.replace('#', '') || 'overview';
+      switchTab(hash);
+    }
+    window.addEventListener('hashchange', () => {
+      const hash = window.location.hash.replace('#', '') || 'overview';
+      switchTab(hash);
+    });
+
+    // =====================================================================
+    // API Helpers
+    // =====================================================================
+    async function api(url, opts) {
+      try {
+        const res = await fetch(url, opts);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Request failed: ' + res.status);
+        }
+        return await res.json();
+      } catch (err) {
+        console.error('API error:', url, err);
+        throw err;
+      }
+    }
+
+    // =====================================================================
+    // Overview
+    // =====================================================================
+    async function loadOverview() {
+      try {
+        overviewData = await api('/api/overview');
+        document.getElementById('stat-experiences').textContent = overviewData.experienceCount;
+        document.getElementById('stat-drafts').textContent = overviewData.pendingDraftCount;
+
+        const errCount = overviewData.systemErrors.length;
+        const healthEl = document.getElementById('stat-health');
+        const healthSub = document.getElementById('stat-health-sub');
+        if (errCount === 0) {
+          healthEl.innerHTML = '<span class="health-icon health-green"></span>';
+          healthSub.textContent = 'All clear';
+        } else if (errCount < 10) {
+          healthEl.innerHTML = '<span class="health-icon health-yellow"></span>';
+          healthSub.textContent = errCount + ' error' + (errCount > 1 ? 's' : '');
+        } else {
+          healthEl.innerHTML = '<span class="health-icon health-red"></span>';
+          healthSub.textContent = errCount + ' errors';
+        }
+
+        const evolvedEl = document.getElementById('stat-evolved');
+        if (overviewData.evolvedCount > 0) {
+          evolvedEl.textContent = overviewData.evolvedCount + ' evolved';
+        } else {
+          evolvedEl.textContent = '';
+        }
+        updateDraftsBadge(overviewData.pendingDraftCount);
+      } catch (err) {
+        document.getElementById('stat-experiences').textContent = 'err';
+        document.getElementById('stat-health').innerHTML = '<span class="health-icon health-red"></span>';
+        document.getElementById('stat-health-sub').textContent = 'Load failed';
+      }
+    }
+
+    function updateDraftsBadge(count) {
+      const badge = document.getElementById('drafts-badge');
+      if (count > 0) {
+        badge.textContent = count;
+        badge.style.display = 'inline';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    // =====================================================================
+    // Experiences
+    // =====================================================================
+    async function loadExperiences() {
+      const container = document.getElementById('experiences-list');
+      container.innerHTML = '<div class="loading-overlay" aria-busy="true">Loading experiences...</div>';
+      try {
+        experiencesData = await api('/api/experiences');
+        renderExperiences();
+      } catch (err) {
+        container.innerHTML = '<div class="empty-state">Failed to load experiences.</div>';
+      }
+    }
+
+    function sortExperiences(mode) {
+      currentSort = mode;
+      document.querySelectorAll('.sort-bar button').forEach(b => b.classList.remove('active'));
+      const btn = document.querySelector('.sort-bar button[data-sort="' + mode + '"]');
+      if (btn) btn.classList.add('active');
+      renderExperiences();
+    }
+
+    function renderExperiences() {
+      const container = document.getElementById('experiences-list');
+      if (experiencesData.length === 0) {
+        container.innerHTML = '<div class="empty-state">No experiences yet. Confirm some drafts to build your experience library.</div>';
+        return;
+      }
+
+      let sorted = [...experiencesData];
+      if (currentSort === 'recent') {
+        sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      } else if (currentSort === 'revised') {
+        sorted.sort((a, b) => (b.revision || 1) - (a.revision || 1));
+      } else if (currentSort === 'alpha') {
+        sorted.sort((a, b) => a.frustrationSignature.localeCompare(b.frustrationSignature));
+      }
+
+      container.innerHTML = sorted.map(exp => {
+        const date = new Date(exp.createdAt).toLocaleDateString();
+        const revLabel = 'v' + (exp.revision || 1);
+        return '<div class="list-item" data-id="' + exp.id + '">' +
+          '<div class="list-item-header" onclick="toggleExperience(\'' + exp.id + '\')">' +
+            '<span class="arrow">&#9654;</span>' +
+            '<span class="title">' + escapeHtml(exp.frustrationSignature) + '</span>' +
+            '<span class="meta">' + revLabel + '  ' + date + '</span>' +
+          '</div>' +
+          '<div class="list-item-detail" id="exp-detail-' + exp.id + '"></div>' +
+        '</div>';
+      }).join('');
+    }
+
+    async function toggleExperience(id) {
+      const item = document.querySelector('.list-item[data-id="' + id + '"]');
+      if (!item) return;
+
+      if (item.classList.contains('expanded')) {
+        item.classList.remove('expanded');
+        return;
+      }
+
+      // Collapse others
+      document.querySelectorAll('#experiences-list .list-item.expanded').forEach(el => el.classList.remove('expanded'));
+
+      const detail = document.getElementById('exp-detail-' + id);
+      detail.innerHTML = '<div class="loading-overlay" aria-busy="true">Loading...</div>';
+      item.classList.add('expanded');
+
+      try {
+        const data = await api('/api/experiences/' + id);
+        const exp = data.experience;
+        const revisions = data.revisions || [];
+
+        let html = '';
+        html += '<div class="detail-section"><h4>Issue</h4><p>' + escapeHtml(exp.frustrationSignature) + '</p></div>';
+
+        if (exp.failedApproaches && exp.failedApproaches.length > 0) {
+          html += '<div class="detail-section"><h4>Failed Approaches</h4><ul>';
+          exp.failedApproaches.forEach(a => { html += '<li>' + escapeHtml(a) + '</li>'; });
+          html += '</ul></div>';
+        }
+
+        if (exp.successfulApproach) {
+          html += '<div class="detail-section"><h4>Solution</h4><p>' + escapeHtml(exp.successfulApproach) + '</p></div>';
+        }
+
+        if (exp.lessons && exp.lessons.length > 0) {
+          html += '<div class="detail-section"><h4>Lessons</h4><ul>';
+          exp.lessons.forEach(l => { html += '<li>' + escapeHtml(l) + '</li>'; });
+          html += '</ul></div>';
+        }
+
+        if (revisions.length > 0) {
+          html += '<div class="detail-section"><h4>Revision History (v' + (exp.revision || 1) + ')</h4>';
+          html += '<div class="revision-timeline">';
+          revisions.forEach(r => {
+            const rDate = new Date(r.createdAt).toLocaleDateString();
+            html += '<div class="revision-entry">' +
+              '<span class="rev-label">v' + r.revision + '</span>' +
+              '<span class="rev-date">' + rDate + '</span>' +
+              escapeHtml(r.frustrationSignature) +
+            '</div>';
+          });
+          html += '</div></div>';
+        }
+
+        detail.innerHTML = html;
+      } catch (err) {
+        detail.innerHTML = '<div class="empty-state">Failed to load details.</div>';
+      }
+    }
+
+    // =====================================================================
+    // Drafts
+    // =====================================================================
+    async function loadDrafts() {
+      const container = document.getElementById('drafts-list');
+      container.innerHTML = '<div class="loading-overlay" aria-busy="true">Loading drafts...</div>';
+      try {
+        draftsData = await api('/api/drafts');
+        renderDrafts();
+        updateDraftsBadge(draftsData.length);
+      } catch (err) {
+        container.innerHTML = '<div class="empty-state">Failed to load drafts.</div>';
+      }
+    }
+
+    function renderDrafts() {
+      const container = document.getElementById('drafts-list');
+      if (draftsData.length === 0) {
+        container.innerHTML = '<div class="empty-state">No pending drafts. Sentinel captures drafts automatically during Claude Code sessions.</div>';
+        return;
+      }
+
+      container.innerHTML = draftsData.map(draft => {
+        const date = new Date(draft.createdAt).toLocaleDateString();
+        const shortId = draft.id.length > 8 ? draft.id.substring(0, 8) : draft.id;
+        return '<div class="list-item" data-id="' + draft.id + '" id="draft-item-' + draft.id + '">' +
+          '<div class="list-item-header" onclick="toggleDraft(\'' + draft.id + '\')">' +
+            '<span class="arrow">&#9654;</span>' +
+            '<span class="title">' + escapeHtml(draft.frustrationSignature || '(untitled)') + '</span>' +
+            '<span class="meta">#' + shortId + '  ' + date + '</span>' +
+          '</div>' +
+          '<div class="list-item-detail" id="draft-detail-' + draft.id + '"></div>' +
+        '</div>';
+      }).join('');
+    }
+
+    async function toggleDraft(id) {
+      const item = document.querySelector('.list-item[data-id="' + id + '"]');
+      if (!item) return;
+
+      if (item.classList.contains('expanded')) {
+        item.classList.remove('expanded');
+        return;
+      }
+
+      // Collapse others
+      document.querySelectorAll('#drafts-list .list-item.expanded').forEach(el => el.classList.remove('expanded'));
+
+      const detail = document.getElementById('draft-detail-' + id);
+      detail.innerHTML = '<div class="loading-overlay" aria-busy="true">Loading...</div>';
+      item.classList.add('expanded');
+
+      try {
+        const draft = await api('/api/drafts/' + id);
+        let html = '';
+
+        if (draft.matchedExperienceId) {
+          html += '<div class="evo-badge">Evolution candidate &mdash; matches Experience #' + escapeHtml(draft.matchedExperienceId) + '</div>';
+        }
+
+        html += '<div class="detail-section"><h4>Issue</h4><p>' + escapeHtml(draft.frustrationSignature || '(empty)') + '</p></div>';
+
+        // Collapsible detail section
+        let hasDetail = (draft.failedApproaches && draft.failedApproaches.length > 0) ||
+          draft.successfulApproach || (draft.lessons && draft.lessons.length > 0) || draft.transcriptData;
+
+        if (hasDetail) {
+          html += '<a href="javascript:void(0)" onclick="toggleDraftDetail(\'' + id + '\')" class="draft-detail-toggle" id="draft-toggle-' + id + '">Detail &#9654;</a>';
+          html += '<div class="draft-detail-body" id="draft-body-' + id + '" style="display:none">';
+
+          if (draft.failedApproaches && draft.failedApproaches.length > 0) {
+            html += '<div class="detail-section"><h4>Failed Approaches</h4><ul>';
+            draft.failedApproaches.forEach(a => { html += '<li>' + escapeHtml(a) + '</li>'; });
+            html += '</ul></div>';
+          }
+
+          if (draft.successfulApproach) {
+            html += '<div class="detail-section"><h4>Solution</h4><p>' + escapeHtml(draft.successfulApproach) + '</p></div>';
+          }
+
+          if (draft.lessons && draft.lessons.length > 0) {
+            html += '<div class="detail-section"><h4>Lessons</h4><ul>';
+            draft.lessons.forEach(l => { html += '<li>' + escapeHtml(l) + '</li>'; });
+            html += '</ul></div>';
+          }
+
+          if (draft.transcriptData) {
+            try {
+              const td = JSON.parse(draft.transcriptData);
+              if (td.messages && td.messages.length > 0) {
+                html += '<div class="detail-section"><h4>Transcript</h4><div class="transcript-box">';
+                td.messages.forEach(m => {
+                  const tag = m.role === 'user' ? '[user]' : m.role === 'assistant' ? '[assistant]' : '[' + m.role + ']';
+                  html += escapeHtml(tag + ' ' + m.content) + '\n\n';
+                });
+                html += '</div></div>';
+              }
+            } catch (e) {
+              html += '<div class="detail-section"><h4>Transcript</h4><p>(failed to parse)</p></div>';
+            }
+          }
+
+          html += '</div>';
+        }
+
+        html += '<div class="action-row">' +
+          '<button class="primary" onclick="confirmDraft(\'' + id + '\')">Confirm</button>' +
+          '<button class="secondary outline" onclick="rejectDraft(\'' + id + '\')">Reject</button>' +
+        '</div>';
+
+        html += '<div id="draft-status-' + id + '"></div>';
+
+        detail.innerHTML = html;
+      } catch (err) {
+        detail.innerHTML = '<div class="empty-state">Failed to load draft details.</div>';
+      }
+    }
+
+    async function confirmDraft(id) {
+      const statusEl = document.getElementById('draft-status-' + id);
+      statusEl.innerHTML = '<div class="loading-overlay" aria-busy="true">Processing... (LLM summarization in progress)</div>';
+
+      // Disable buttons
+      const item = document.getElementById('draft-item-' + id);
+      if (item) {
+        item.querySelectorAll('.action-row button').forEach(b => b.disabled = true);
+      }
+
+      try {
+        const result = await api('/api/drafts/' + id + '/confirm', { method: 'POST' });
+        let msg = '';
+        if (result.status === 'evolved') {
+          msg = 'Experience evolved successfully.';
+        } else if (result.status === 'stored') {
+          msg = 'New experience stored successfully.';
+        } else if (result.status === 'duplicate') {
+          msg = 'Skipped (duplicate of existing experience).';
+        } else {
+          msg = 'Completed with status: ' + result.status;
+        }
+        statusEl.innerHTML = '<div class="confirm-result success">' + msg + '</div>';
+
+        // Remove from list after a short delay
+        setTimeout(() => {
+          draftsData = draftsData.filter(d => d.id !== id);
+          renderDrafts();
+          loadOverview();
+        }, 1500);
+      } catch (err) {
+        statusEl.innerHTML = '<div class="confirm-result error">Error: ' + escapeHtml(err.message) + '</div>';
+        // Re-enable buttons
+        if (item) {
+          item.querySelectorAll('.action-row button').forEach(b => b.disabled = false);
+        }
+      }
+    }
+
+    async function rejectDraft(id) {
+      try {
+        await api('/api/drafts/' + id + '/reject', { method: 'POST' });
+        draftsData = draftsData.filter(d => d.id !== id);
+        renderDrafts();
+        loadOverview();
+      } catch (err) {
+        const statusEl = document.getElementById('draft-status-' + id);
+        if (statusEl) {
+          statusEl.innerHTML = '<div class="confirm-result error">Error: ' + escapeHtml(err.message) + '</div>';
+        }
+      }
+    }
+
+    function toggleDraftDetail(id) {
+      const body = document.getElementById('draft-body-' + id);
+      const toggle = document.getElementById('draft-toggle-' + id);
+      if (!body || !toggle) return;
+      if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.innerHTML = 'Detail &#9660;';
+      } else {
+        body.style.display = 'none';
+        toggle.innerHTML = 'Detail &#9654;';
+      }
+    }
+
+    // =====================================================================
+    // Patterns
+    // =====================================================================
+    async function loadPatterns() {
+      const content = document.getElementById('patterns-content');
+      const meta = document.getElementById('patterns-meta');
+
+      try {
+        const [data, trend] = await Promise.all([
+          api('/api/patterns'),
+          api('/api/patterns/trend'),
+        ]);
+        patternsData = data;
+        patternsTrend = trend;
+        currentPatternLang = 'en';
+        document.getElementById('patterns-lang').value = 'en';
+
+        if (!patternsData.analysis) {
+          meta.textContent = patternsData.currentExperienceCount + ' experiences available for analysis';
+          content.innerHTML = '<div class="empty-state">No analysis yet. Click "New Analyze" to discover patterns in your experiences.</div>';
+          return;
+        }
+
+        updatePatternsMeta();
+        renderPatterns(patternsData.analysis.result);
+      } catch (err) {
+        content.innerHTML = '<div class="empty-state">Failed to load patterns data.</div>';
+      }
+    }
+
+    function updatePatternsMeta() {
+      const meta = document.getElementById('patterns-meta');
+      if (!patternsData || !patternsData.analysis) { meta.textContent = ''; return; }
+      const date = new Date(patternsData.analysis.createdAt).toLocaleDateString();
+      let text = 'Last analyzed: ' + date;
+      if (patternsData.newSinceAnalysis > 0) {
+        text += ' (+' + patternsData.newSinceAnalysis + ' new since then)';
+      }
+      meta.textContent = text;
+    }
+
+    function renderPatterns(result) {
+      const content = document.getElementById('patterns-content');
+      let html = '';
+
+      // Sentinel Insight
+      html += '<div class="insight-card">' + renderMarkdown(result.insight) + '</div>';
+
+      // Grid: Weak Areas + Trend
+      html += '<div class="patterns-grid">';
+
+      // Weak Areas
+      html += '<article>';
+      html += '<h4>Weak Areas</h4>';
+      if (result.weakAreas && result.weakAreas.length > 0) {
+        const maxCount = Math.max(...result.weakAreas.map(w => w.count), 1);
+        result.weakAreas.forEach(area => {
+          const pct = Math.round((area.count / maxCount) * 100);
+          html += '<div class="weak-area-row">' +
+            '<span class="weak-area-label" title="' + escapeHtml(area.category) + ' — ' + escapeHtml(area.description) + '">' + escapeHtml(area.category) + '</span>' +
+            '<div class="weak-area-bar-bg"><div class="weak-area-bar" style="width:' + pct + '%"></div></div>' +
+            '<span class="weak-area-count">' + area.count + '</span>' +
+          '</div>';
+        });
+      } else {
+        html += '<div class="trend-empty">No weak areas detected</div>';
+      }
+      html += '</article>';
+
+      // Frustration Trend
+      html += '<article>';
+      html += '<h4>Frustration Trend (30 days)</h4>';
+      if (patternsTrend && patternsTrend.length > 0) {
+        const maxTrend = Math.max(...patternsTrend.map(t => t.count), 1);
+        html += '<div class="trend-bars">';
+        patternsTrend.forEach(t => {
+          const h = Math.max(2, Math.round((t.count / maxTrend) * 80));
+          html += '<div class="trend-bar" style="height:' + h + 'px" data-tooltip="' + t.date + ': ' + t.count + '"></div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div class="trend-empty">No frustration data in the last 30 days</div>';
+      }
+      html += '</article>';
+
+      html += '</div>'; // close patterns-grid
+
+      // Resolution Rate
+      html += '<article style="margin-bottom:1.5rem;padding:1rem">';
+      html += '<h4 style="font-size:0.85rem;color:var(--pico-muted-color);text-transform:uppercase;margin-bottom:0.75rem">Resolution Rate</h4>';
+      const rate = Math.round(result.resolutionRate);
+      html += '<div class="resolution-bar-bg"><div class="resolution-bar" style="width:' + rate + '%"></div></div>';
+      html += '<span class="resolution-text">' + rate + '%</span> <span style="color:var(--pico-muted-color);font-size:0.85rem">resolved</span>';
+      html += '</article>';
+
+      content.innerHTML = html;
+    }
+
+    async function runAnalysis() {
+      const btn = document.getElementById('btn-analyze');
+      const content = document.getElementById('patterns-content');
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.textContent = 'Analyzing...';
+
+      try {
+        const result = await api('/api/patterns/analyze', { method: 'POST' });
+        // Reload to get meta + trend
+        const [data, trend] = await Promise.all([
+          api('/api/patterns'),
+          api('/api/patterns/trend'),
+        ]);
+        patternsData = data;
+        patternsTrend = trend;
+        currentPatternLang = 'en';
+        document.getElementById('patterns-lang').value = 'en';
+        updatePatternsMeta();
+        renderPatterns(result.analysis);
+      } catch (err) {
+        content.innerHTML = '<div class="confirm-result error">Analysis failed: ' + escapeHtml(err.message) + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = 'New Analyze';
+      }
+    }
+
+    async function onPatternLangChange(lang) {
+      if (lang === 'en') {
+        currentPatternLang = 'en';
+        if (patternsData && patternsData.analysis) {
+          renderPatterns(patternsData.analysis.result);
+        }
+        return;
+      }
+
+      const content = document.getElementById('patterns-content');
+      content.innerHTML = '<div class="loading-overlay" aria-busy="true">Translating...</div>';
+      currentPatternLang = lang;
+
+      try {
+        const translated = await api('/api/patterns/translate/' + lang);
+        // Only render if lang hasn't changed while waiting
+        if (currentPatternLang === lang) {
+          renderPatterns(translated);
+        }
+      } catch (err) {
+        if (currentPatternLang === lang) {
+          content.innerHTML = '<div class="confirm-result error">Translation failed: ' + escapeHtml(err.message) + '</div>';
+        }
+      }
+    }
+
+    // =====================================================================
+    // Utilities
+    // =====================================================================
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function renderMarkdown(str) {
+      if (!str) return '';
+      let html = escapeHtml(str);
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+      return html;
+    }
+
+    // =====================================================================
+    // Init
+    // =====================================================================
+    initFromHash();
+  </script>
+</body>
+</html>

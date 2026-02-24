@@ -16,6 +16,7 @@ import { registerHookCommand } from './cli/hook-command';
 import { registerReviewCommands } from './cli/review-commands';
 import { registerExperienceCommands } from './cli/experience-commands';
 import { registerSettingsCommands } from './cli/settings-commands';
+import { registerDashboardCommand } from './cli/dashboard-command';
 
 export function createProgram(deps: CreateProgramDeps): Command {
   const program = new Command();
@@ -47,6 +48,7 @@ export function createProgram(deps: CreateProgramDeps): Command {
   registerReviewCommands(program, deps, io);
   registerExperienceCommands(program, deps, io);
   registerSettingsCommands(program, deps, io);
+  registerDashboardCommand(program, deps, io);
 
   return program;
 }
