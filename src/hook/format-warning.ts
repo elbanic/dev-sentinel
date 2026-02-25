@@ -96,12 +96,9 @@ export function formatWarning(match: MatchResult): string {
   // Separator
   lines.push('\u251C' + '\u2500'.repeat(dashCount) + '\u2524');
 
-  // Experience summary
+  // Experience summary (issue + lessons for compact display)
   const summaryParts: { label: string; value: string }[] = [];
   summaryParts.push({ label: 'Issue', value: match.experience.frustrationSignature });
-  if (match.experience.failedApproaches.length > 0) {
-    summaryParts.push({ label: 'Failed', value: match.experience.failedApproaches.join(', ') });
-  }
   if (match.experience.lessons.length > 0) {
     summaryParts.push({ label: 'Lesson', value: match.experience.lessons.join(', ') });
   }
@@ -113,14 +110,6 @@ export function formatWarning(match: MatchResult): string {
       const prefix = i === 0 ? FIRST_PREFIX : CONT_PREFIX;
       lines.push(padLine(prefix + wrapped[i], boxWidth));
     }
-  }
-
-  // Suggested action
-  const actionText = '"' + match.suggestedAction + '"';
-  const actionWrapped = wordWrap(actionText, actionWidth);
-  for (let i = 0; i < actionWrapped.length; i++) {
-    const prefix = i === 0 ? ACTION_PREFIX : '  ';
-    lines.push(padLine(prefix + actionWrapped[i], boxWidth));
   }
 
   // Bottom border
