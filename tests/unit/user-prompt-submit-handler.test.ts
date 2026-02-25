@@ -132,6 +132,7 @@ function createMockSqliteStore(): jest.Mocked<Pick<SqliteStore,
   'getPendingDrafts' | 'storeCandidate' | 'deleteCandidate' | 'updateCandidateStatus' |
   'storeExperience' | 'getExperience' |
   'getAdvisedExperienceIds' | 'recordAdvice' |
+  'markAdvicesEffective' | 'markPriorAdviceIneffective' |
   'initialize' | 'close' | 'runInTransaction'
 >> & SqliteStore {
   return {
@@ -149,6 +150,8 @@ function createMockSqliteStore(): jest.Mocked<Pick<SqliteStore,
     getExperience: jest.fn().mockReturnValue(null),
     getAdvisedExperienceIds: jest.fn().mockReturnValue([]),
     recordAdvice: jest.fn(),
+    markAdvicesEffective: jest.fn().mockReturnValue(0),
+    markPriorAdviceIneffective: jest.fn().mockReturnValue(0),
     recordHookError: jest.fn(),
     initialize: jest.fn(),
     close: jest.fn(),
@@ -159,6 +162,7 @@ function createMockSqliteStore(): jest.Mocked<Pick<SqliteStore,
     'getPendingDrafts' | 'storeCandidate' | 'deleteCandidate' | 'updateCandidateStatus' |
     'storeExperience' | 'getExperience' |
     'getAdvisedExperienceIds' | 'recordAdvice' |
+    'markAdvicesEffective' | 'markPriorAdviceIneffective' |
     'initialize' | 'close' | 'runInTransaction'
   >> & SqliteStore;
 }
@@ -1564,6 +1568,178 @@ describe('UserPromptSubmitHandler - handleUserPromptSubmit', () => {
 
       // Assert: should still return empty JSON (graceful degradation)
       expect(result).toBe('{}');
+    });
+  });
+
+  // =========================================================================
+  // Feature 2: Feedback Loop - advice outcome tracking
+  // =========================================================================
+  describe('Feature 2: advice outcome tracking', () => {
+    it('should call markAdvicesEffective on resolution when frustrated flag exists', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'resolution' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue({
+        session_id: 'session-eff',
+        status: 'frustrated',
+        flagged_at: '2026-02-16T00:00:00Z',
+        updated_at: '2026-02-16T00:00:00Z',
+        matched_experience_id: null,
+      });
+
+      await handleUserPromptSubmit({
+        prompt: 'It works now',
+        sessionId: 'session-eff',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.markAdvicesEffective).toHaveBeenCalledWith('session-eff');
+    });
+
+    it('should NOT call markAdvicesEffective on resolution when no frustrated flag', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'resolution' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue(null);
+
+      await handleUserPromptSubmit({
+        prompt: 'It works now',
+        sessionId: 'session-no-flag',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.markAdvicesEffective).not.toHaveBeenCalled();
+    });
+
+    it('should NOT call markAdvicesEffective on abandonment (only resolution triggers effective)', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'abandonment' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue({
+        session_id: 'session-abn',
+        status: 'frustrated',
+        flagged_at: '2026-02-16T00:00:00Z',
+        updated_at: '2026-02-16T00:00:00Z',
+        matched_experience_id: null,
+      });
+      (mockSqliteStore.getAdvisedExperienceIds as jest.Mock).mockReturnValue([]);
+
+      await handleUserPromptSubmit({
+        prompt: 'Giving up on this',
+        sessionId: 'session-abn',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.markAdvicesEffective).not.toHaveBeenCalled();
+    });
+
+    it('should call markPriorAdviceIneffective per advisedId on abandonment', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'abandonment' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue({
+        session_id: 'session-ineff',
+        status: 'frustrated',
+        flagged_at: '2026-02-16T00:00:00Z',
+        updated_at: '2026-02-16T00:00:00Z',
+        matched_experience_id: null,
+      });
+      (mockSqliteStore.getAdvisedExperienceIds as jest.Mock).mockReturnValue(['exp-a', 'exp-b']);
+
+      await handleUserPromptSubmit({
+        prompt: 'Giving up on this approach',
+        sessionId: 'session-ineff',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.markPriorAdviceIneffective).toHaveBeenCalledWith('exp-a', 'session-ineff');
+      expect(mockSqliteStore.markPriorAdviceIneffective).toHaveBeenCalledWith('exp-b', 'session-ineff');
+    });
+
+    it('should NOT call markPriorAdviceIneffective on abandonment when no advised IDs', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'abandonment' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue({
+        session_id: 'session-no-adv',
+        status: 'frustrated',
+        flagged_at: '2026-02-16T00:00:00Z',
+        updated_at: '2026-02-16T00:00:00Z',
+        matched_experience_id: null,
+      });
+      (mockSqliteStore.getAdvisedExperienceIds as jest.Mock).mockReturnValue([]);
+
+      await handleUserPromptSubmit({
+        prompt: 'Giving up',
+        sessionId: 'session-no-adv',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.markPriorAdviceIneffective).not.toHaveBeenCalled();
+    });
+
+    it('should still call upgradeFlag when markAdvicesEffective throws (graceful)', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'resolution' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue({
+        session_id: 'session-err-eff',
+        status: 'frustrated',
+        flagged_at: '2026-02-16T00:00:00Z',
+        updated_at: '2026-02-16T00:00:00Z',
+        matched_experience_id: null,
+      });
+      (mockSqliteStore.markAdvicesEffective as jest.Mock).mockImplementation(() => {
+        throw new Error('DB error');
+      });
+
+      await handleUserPromptSubmit({
+        prompt: 'It works now',
+        sessionId: 'session-err-eff',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.upgradeFlag).toHaveBeenCalledWith('session-err-eff', 'capture');
+    });
+
+    it('should still call upgradeFlag when markPriorAdviceIneffective throws (graceful)', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'abandonment' }));
+      (mockSqliteStore.getFlag as jest.Mock).mockReturnValue({
+        session_id: 'session-err-ineff',
+        status: 'frustrated',
+        flagged_at: '2026-02-16T00:00:00Z',
+        updated_at: '2026-02-16T00:00:00Z',
+        matched_experience_id: null,
+      });
+      (mockSqliteStore.getAdvisedExperienceIds as jest.Mock).mockReturnValue(['exp-x']);
+      (mockSqliteStore.markPriorAdviceIneffective as jest.Mock).mockImplementation(() => {
+        throw new Error('DB error');
+      });
+
+      await handleUserPromptSubmit({
+        prompt: 'Abandoning this',
+        sessionId: 'session-err-ineff',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.upgradeFlag).toHaveBeenCalledWith('session-err-ineff', 'capture');
+    });
+
+    it('should NOT call markAdvicesEffective or markPriorAdviceIneffective for normal type', async () => {
+      mockedAnalyzeFrustration.mockResolvedValue(makeAnalysis({ type: 'normal' }));
+
+      await handleUserPromptSubmit({
+        prompt: 'Regular question',
+        sessionId: 'session-normal',
+        llmProvider: mockLLM,
+        sqliteStore: mockSqliteStore,
+        vectorStore: mockVectorStore,
+      });
+
+      expect(mockSqliteStore.markAdvicesEffective).not.toHaveBeenCalled();
+      expect(mockSqliteStore.markPriorAdviceIneffective).not.toHaveBeenCalled();
     });
   });
 });

@@ -19,11 +19,23 @@ export function registerRoutes(app: Express, deps: CreateProgramDeps): void {
     const pendingDrafts = sqliteStore.getPendingDrafts();
     const systemErrors = sqliteStore.getPersistentErrors();
 
+    // Feature 2: aggregate advice effectiveness
+    const allStats = sqliteStore.getAllEffectivenessStats();
+    let effective = 0, ineffective = 0, unknown = 0;
+    for (const s of allStats) {
+      effective += s.effective;
+      ineffective += s.ineffective;
+      unknown += s.unknown;
+    }
+    const total = effective + ineffective;
+    const rate = total === 0 ? null : Math.round((effective / total) * 100);
+
     res.json({
       experienceCount: experiences.length,
       evolvedCount,
       pendingDraftCount: pendingDrafts.length,
       systemErrors,
+      adviceEffectiveness: { effective, ineffective, unknown, rate },
     });
   });
 
@@ -42,7 +54,8 @@ export function registerRoutes(app: Express, deps: CreateProgramDeps): void {
       return;
     }
     const revisions = sqliteStore.getRevisions(id);
-    res.json({ experience, revisions });
+    const effectiveness = sqliteStore.getEffectivenessStats(id);
+    res.json({ experience, revisions, effectiveness });
   });
 
   // GET /api/drafts — pending drafts

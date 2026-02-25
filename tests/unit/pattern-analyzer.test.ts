@@ -12,7 +12,7 @@ import {
   cleanupDeps,
   type TestDeps,
 } from '../helpers/cli-test-helpers';
-import type { FailureExperience } from '../../src/types/index';
+import type { EffectivenessStats, FailureExperience } from '../../src/types/index';
 import {
   buildAnalysisInput,
   analyzePatterns,
@@ -80,6 +80,30 @@ describe('Pattern Analyzer', () => {
     it('should handle empty experiences', () => {
       const input = buildAnalysisInput([], []);
       expect(typeof input).toBe('string');
+    });
+
+    it('should include effectiveness data when effectivenessMap is provided', () => {
+      const experiences = [makeExperience({ id: 'e1' })];
+      const trend = [{ date: '2026-02-20', count: 3 }];
+      const effectivenessMap = new Map<string, EffectivenessStats>([
+        ['e1', { experienceId: 'e1', effective: 3, ineffective: 1, unknown: 1, effectivenessRate: 0.75 }],
+      ]);
+
+      const input = buildAnalysisInput(experiences, trend, effectivenessMap);
+
+      expect(input).toContain('Advice Effectiveness');
+      expect(input).toContain('3 effective');
+      expect(input).toContain('1 ineffective');
+      expect(input).toContain('75%');
+    });
+
+    it('should not include effectiveness line when effectivenessMap is not provided', () => {
+      const experiences = [makeExperience({ id: 'e1' })];
+      const trend: Array<{ date: string; count: number }> = [];
+
+      const input = buildAnalysisInput(experiences, trend);
+
+      expect(input).not.toContain('Advice Effectiveness');
     });
   });
 

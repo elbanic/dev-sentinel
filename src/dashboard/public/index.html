@@ -370,10 +370,10 @@
           <div class="stat-value" id="stat-drafts">-</div>
           <div class="stat-label">Pending Drafts</div>
         </article>
-        <article class="stat-card">
-          <div class="stat-value">---</div>
+        <article class="stat-card" id="card-advice-effect">
+          <div class="stat-value" id="stat-advice-effect">---</div>
           <div class="stat-label">Advice Effect.</div>
-          <div class="stat-sub">(coming soon)</div>
+          <div class="stat-sub" id="stat-advice-effect-sub">(no data)</div>
         </article>
         <article class="stat-card">
           <div class="stat-value" id="stat-health"><span class="health-icon"></span></div>
@@ -516,6 +516,22 @@
         } else {
           evolvedEl.textContent = '';
         }
+
+        // Feature 2: Advice Effectiveness card
+        const ae = overviewData.adviceEffectiveness;
+        const aeVal = document.getElementById('stat-advice-effect');
+        const aeSub = document.getElementById('stat-advice-effect-sub');
+        if (ae && ae.rate !== null) {
+          aeVal.textContent = ae.rate + '%';
+          aeSub.textContent = ae.effective + ' effective / ' + (ae.effective + ae.ineffective) + ' total';
+        } else if (ae && (ae.effective + ae.ineffective + ae.unknown) > 0) {
+          aeVal.textContent = '---';
+          aeSub.textContent = ae.unknown + ' pending';
+        } else {
+          aeVal.textContent = '---';
+          aeSub.textContent = '(no data)';
+        }
+
         updateDraftsBadge(overviewData.pendingDraftCount);
       } catch (err) {
         document.getElementById('stat-experiences').textContent = 'err';
@@ -917,13 +933,38 @@
 
       html += '</div>'; // close patterns-grid
 
+      // Grid: Resolution Rate + Advice Effectiveness (2-column, same as above)
+      html += '<div class="patterns-grid">';
+
       // Resolution Rate
-      html += '<article style="margin-bottom:1.5rem;padding:1rem">';
-      html += '<h4 style="font-size:0.85rem;color:var(--pico-muted-color);text-transform:uppercase;margin-bottom:0.75rem">Resolution Rate</h4>';
+      html += '<article>';
+      html += '<h4>Resolution Rate</h4>';
       const rate = Math.round(result.resolutionRate);
       html += '<div class="resolution-bar-bg"><div class="resolution-bar" style="width:' + rate + '%"></div></div>';
       html += '<span class="resolution-text">' + rate + '%</span> <span style="color:var(--pico-muted-color);font-size:0.85rem">resolved</span>';
       html += '</article>';
+
+      // Advice Effectiveness
+      html += '<article>';
+      html += '<h4>Advice Effectiveness</h4>';
+      if (overviewData && overviewData.adviceEffectiveness) {
+        const ae = overviewData.adviceEffectiveness;
+        const aeTotal = ae.effective + ae.ineffective;
+        if (aeTotal > 0) {
+          const aeRate = ae.rate;
+          html += '<div class="resolution-bar-bg"><div class="resolution-bar" style="width:' + aeRate + '%;background:var(--pico-primary)"></div></div>';
+          html += '<span class="resolution-text">' + aeRate + '%</span> <span style="color:var(--pico-muted-color);font-size:0.85rem">effective (' + ae.effective + '/' + aeTotal + ')</span>';
+        } else if (overviewData.adviceEffectiveness.unknown > 0) {
+          html += '<div class="trend-empty">' + ae.unknown + ' pending outcome(s)</div>';
+        } else {
+          html += '<div class="trend-empty">No advice data yet</div>';
+        }
+      } else {
+        html += '<div class="trend-empty">No advice data yet</div>';
+      }
+      html += '</article>';
+
+      html += '</div>'; // close patterns-grid
 
       content.innerHTML = html;
     }

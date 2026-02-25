@@ -48,6 +48,10 @@ Dev Sentinel watches Claude Code sessions and turns developer struggles into reu
 
 The result: struggles compound into engineering intuition.
 
+### What Sentinel Is NOT
+
+Sentinel does not just handle errors or provide solutions. It reminds the developer: "You've been here before — you might be circling the same trap. Consider shifting your approach." Sentinel is a **perspective nudge** and an **experience building assistant**.
+
 ---
 
 ## Architecture: Unified Frustration Pipeline

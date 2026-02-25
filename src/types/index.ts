@@ -188,7 +188,20 @@ export const PatternAnalysisResultSchema = z.object({
 export type PatternAnalysisResult = z.infer<typeof PatternAnalysisResultSchema>;
 
 // ---------------------------------------------------------------------------
-// 11. Persistent Error Tracking
+// 11. Advice Outcome + Effectiveness Stats
+// ---------------------------------------------------------------------------
+export type AdviceOutcome = 'unknown' | 'effective' | 'ineffective';
+
+export interface EffectivenessStats {
+  experienceId: string;
+  effective: number;
+  ineffective: number;
+  unknown: number;
+  effectivenessRate: number | null; // null when effective+ineffective === 0
+}
+
+// ---------------------------------------------------------------------------
+// 12. Persistent Error Tracking
 // ---------------------------------------------------------------------------
 export type HookErrorComponent = 'llm' | 'database' | 'vector' | 'transcript';
 

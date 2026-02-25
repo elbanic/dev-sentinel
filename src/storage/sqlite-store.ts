@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { AutoMemoryCandidate, ExperienceRevision, FailureExperience, HookErrorComponent, PersistentErrorSummary } from '../types/index';
+import type { AutoMemoryCandidate, EffectivenessStats, ExperienceRevision, FailureExperience, HookErrorComponent, PersistentErrorSummary } from '../types/index';
 
 // Row types returned by better-sqlite3 queries
 interface TurnRow {
@@ -156,6 +156,13 @@ export class SqliteStore {
     // Migration: add matched_experience_id column to auto_memory_candidates table
     try {
       this.db.exec('ALTER TABLE auto_memory_candidates ADD COLUMN matched_experience_id TEXT');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Migration: add outcome column to session_advices table (Feature 2: Feedback Loop)
+    try {
+      this.db.exec("ALTER TABLE session_advices ADD COLUMN outcome TEXT DEFAULT 'unknown'");
     } catch {
       // Column already exists, ignore
     }
@@ -576,6 +583,82 @@ export class SqliteStore {
         'INSERT OR IGNORE INTO session_advices (session_id, experience_id) VALUES (?, ?)',
       )
       .run(sessionId, experienceId);
+  }
+
+  markAdvicesEffective(sessionId: string): number {
+    this.ensureOpen();
+    const result = this.db
+      .prepare(
+        "UPDATE session_advices SET outcome = 'effective' WHERE session_id = ? AND outcome = 'unknown'",
+      )
+      .run(sessionId);
+    return result.changes;
+  }
+
+  markPriorAdviceIneffective(experienceId: string, currentSessionId: string): number {
+    this.ensureOpen();
+    const result = this.db
+      .prepare(
+        "UPDATE session_advices SET outcome = 'ineffective' WHERE experience_id = ? AND session_id != ? AND outcome = 'unknown'",
+      )
+      .run(experienceId, currentSessionId);
+    return result.changes;
+  }
+
+  getEffectivenessStats(experienceId: string): EffectivenessStats {
+    this.ensureOpen();
+    const rows = this.db
+      .prepare(
+        'SELECT outcome, COUNT(*) as count FROM session_advices WHERE experience_id = ? GROUP BY outcome',
+      )
+      .all(experienceId) as { outcome: string; count: number }[];
+
+    let effective = 0;
+    let ineffective = 0;
+    let unknown = 0;
+    for (const row of rows) {
+      if (row.outcome === 'effective') effective = row.count;
+      else if (row.outcome === 'ineffective') ineffective = row.count;
+      else unknown = row.count;
+    }
+
+    const total = effective + ineffective;
+    const effectivenessRate = total === 0 ? null : effective / total;
+
+    return { experienceId, effective, ineffective, unknown, effectivenessRate };
+  }
+
+  getAllEffectivenessStats(): EffectivenessStats[] {
+    this.ensureOpen();
+    const rows = this.db
+      .prepare(
+        'SELECT experience_id, outcome, COUNT(*) as count FROM session_advices GROUP BY experience_id, outcome',
+      )
+      .all() as { experience_id: string; outcome: string; count: number }[];
+
+    const map = new Map<string, { effective: number; ineffective: number; unknown: number }>();
+    for (const row of rows) {
+      if (!map.has(row.experience_id)) {
+        map.set(row.experience_id, { effective: 0, ineffective: 0, unknown: 0 });
+      }
+      const entry = map.get(row.experience_id)!;
+      if (row.outcome === 'effective') entry.effective = row.count;
+      else if (row.outcome === 'ineffective') entry.ineffective = row.count;
+      else entry.unknown = row.count;
+    }
+
+    const stats: EffectivenessStats[] = [];
+    for (const [experienceId, counts] of map) {
+      const total = counts.effective + counts.ineffective;
+      stats.push({
+        experienceId,
+        effective: counts.effective,
+        ineffective: counts.ineffective,
+        unknown: counts.unknown,
+        effectivenessRate: total === 0 ? null : counts.effective / total,
+      });
+    }
+    return stats;
   }
 
   // =========================================================================

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Struggle Equity.**
+### "Struggle Equity."
 
 *What broke you guards you.*
 

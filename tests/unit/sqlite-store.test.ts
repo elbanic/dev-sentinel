@@ -807,4 +807,162 @@ describe('SqliteStore', () => {
       expect(store.getPatternTranslation('pa-reset', 'ko')).toBeNull();
     });
   });
+
+  // =========================================================================
+  // advice outcome tracking (Feature 2: Feedback Loop)
+  // =========================================================================
+  describe('advice outcome tracking', () => {
+    // Helper: record advice for a session+experience (creates experience if not exists)
+    function seedAdvice(sessionId: string, experienceId: string): void {
+      if (!store.getExperience(experienceId)) {
+        store.storeExperience(makeExperience({ id: experienceId }));
+      }
+      store.recordAdvice(sessionId, experienceId);
+    }
+
+    it('should default outcome to unknown for new advices', () => {
+      seedAdvice('s1', 'exp-out-001');
+      const stats = store.getEffectivenessStats('exp-out-001');
+      expect(stats.unknown).toBe(1);
+      expect(stats.effective).toBe(0);
+      expect(stats.ineffective).toBe(0);
+      expect(stats.effectivenessRate).toBeNull();
+    });
+
+    it('should be idempotent when calling initialize() twice (migration does not fail)', () => {
+      seedAdvice('s1', 'exp-idem');
+      expect(() => store.initialize()).not.toThrow();
+      const stats = store.getEffectivenessStats('exp-idem');
+      expect(stats.unknown).toBe(1);
+    });
+
+    // markAdvicesEffective
+    it('markAdvicesEffective should update only unknown advices in target session', () => {
+      seedAdvice('sess-a', 'exp-eff-001');
+      seedAdvice('sess-a', 'exp-eff-002');
+      seedAdvice('sess-b', 'exp-eff-001'); // different session, same experience
+
+      store.markAdvicesEffective('sess-a');
+
+      const stats1 = store.getEffectivenessStats('exp-eff-001');
+      expect(stats1.effective).toBe(1); // sess-a marked effective
+      expect(stats1.unknown).toBe(1);   // sess-b still unknown
+
+      const stats2 = store.getEffectivenessStats('exp-eff-002');
+      expect(stats2.effective).toBe(1);
+    });
+
+    it('markAdvicesEffective should not update already effective advices (idempotent)', () => {
+      seedAdvice('sess-c', 'exp-eff-idem');
+      store.markAdvicesEffective('sess-c');
+      store.markAdvicesEffective('sess-c'); // call again
+
+      const stats = store.getEffectivenessStats('exp-eff-idem');
+      expect(stats.effective).toBe(1);
+    });
+
+    it('markAdvicesEffective should return the number of changed rows', () => {
+      seedAdvice('sess-d', 'exp-eff-ret-1');
+      seedAdvice('sess-d', 'exp-eff-ret-2');
+
+      const changed = store.markAdvicesEffective('sess-d');
+      expect(changed).toBe(2);
+
+      // Second call: nothing to change
+      const changed2 = store.markAdvicesEffective('sess-d');
+      expect(changed2).toBe(0);
+    });
+
+    // markPriorAdviceIneffective
+    it('markPriorAdviceIneffective should update unknown advices in OTHER sessions', () => {
+      seedAdvice('sess-old', 'exp-ineff-001');
+      seedAdvice('sess-current', 'exp-ineff-001');
+
+      store.markPriorAdviceIneffective('exp-ineff-001', 'sess-current');
+
+      const stats = store.getEffectivenessStats('exp-ineff-001');
+      expect(stats.ineffective).toBe(1); // sess-old marked ineffective
+      expect(stats.unknown).toBe(1);     // sess-current still unknown
+    });
+
+    it('markPriorAdviceIneffective should skip already effective advices', () => {
+      seedAdvice('sess-eff-first', 'exp-skip-eff');
+      store.markAdvicesEffective('sess-eff-first');
+
+      seedAdvice('sess-later', 'exp-skip-eff');
+      store.markPriorAdviceIneffective('exp-skip-eff', 'sess-later');
+
+      const stats = store.getEffectivenessStats('exp-skip-eff');
+      expect(stats.effective).toBe(1); // still effective, not overwritten
+      expect(stats.unknown).toBe(1);   // sess-later untouched
+    });
+
+    it('markPriorAdviceIneffective should return the number of changed rows', () => {
+      seedAdvice('sess-p1', 'exp-ineff-ret');
+      seedAdvice('sess-p2', 'exp-ineff-ret');
+      seedAdvice('sess-curr', 'exp-ineff-ret');
+
+      const changed = store.markPriorAdviceIneffective('exp-ineff-ret', 'sess-curr');
+      expect(changed).toBe(2);
+    });
+
+    // getEffectivenessStats
+    it('getEffectivenessStats should return correct counts', () => {
+      seedAdvice('s1', 'exp-stats');
+      seedAdvice('s2', 'exp-stats');
+      seedAdvice('s3', 'exp-stats');
+
+      store.markAdvicesEffective('s1');
+      store.markPriorAdviceIneffective('exp-stats', 's3');
+      // s1: effective, s2: ineffective (prior to s3), s3: unknown
+
+      const stats = store.getEffectivenessStats('exp-stats');
+      expect(stats.experienceId).toBe('exp-stats');
+      expect(stats.effective).toBe(1);
+      expect(stats.ineffective).toBe(1);
+      expect(stats.unknown).toBe(1);
+      expect(stats.effectivenessRate).toBe(0.5); // 1/(1+1)
+    });
+
+    it('getEffectivenessStats should return zeros for non-existent experience', () => {
+      const stats = store.getEffectivenessStats('non-existent');
+      expect(stats.experienceId).toBe('non-existent');
+      expect(stats.effective).toBe(0);
+      expect(stats.ineffective).toBe(0);
+      expect(stats.unknown).toBe(0);
+      expect(stats.effectivenessRate).toBeNull();
+    });
+
+    it('getEffectivenessStats should return null rate when only unknowns exist', () => {
+      seedAdvice('s-unk', 'exp-unk-only');
+      const stats = store.getEffectivenessStats('exp-unk-only');
+      expect(stats.effectivenessRate).toBeNull();
+    });
+
+    // getAllEffectivenessStats
+    it('getAllEffectivenessStats should aggregate across multiple experiences', () => {
+      seedAdvice('s1', 'exp-all-1');
+      seedAdvice('s2', 'exp-all-1');
+      seedAdvice('s1', 'exp-all-2');
+
+      store.markAdvicesEffective('s1');
+
+      const allStats = store.getAllEffectivenessStats();
+      expect(allStats.length).toBe(2);
+
+      const stats1 = allStats.find(s => s.experienceId === 'exp-all-1');
+      expect(stats1).toBeDefined();
+      expect(stats1!.effective).toBe(1);
+      expect(stats1!.unknown).toBe(1);
+
+      const stats2 = allStats.find(s => s.experienceId === 'exp-all-2');
+      expect(stats2).toBeDefined();
+      expect(stats2!.effective).toBe(1);
+    });
+
+    it('getAllEffectivenessStats should return empty array when no advices exist', () => {
+      const allStats = store.getAllEffectivenessStats();
+      expect(allStats).toEqual([]);
+    });
+  });
 });

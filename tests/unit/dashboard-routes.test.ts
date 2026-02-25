@@ -473,4 +473,80 @@ describe('Dashboard API Routes', () => {
       expect(response.status).toBe(500);
     });
   });
+
+  // =========================================================================
+  // Feature 2: adviceEffectiveness in API responses
+  // =========================================================================
+  describe('Feature 2: adviceEffectiveness', () => {
+    describe('GET /api/overview - includes adviceEffectiveness', () => {
+      it('should include adviceEffectiveness field in overview response', async () => {
+        const app = createAppWithRoutes(deps);
+
+        const response = await request(app).get('/api/overview');
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveProperty('adviceEffectiveness');
+        expect(response.body.adviceEffectiveness).toHaveProperty('effective');
+        expect(response.body.adviceEffectiveness).toHaveProperty('ineffective');
+        expect(response.body.adviceEffectiveness).toHaveProperty('unknown');
+        expect(response.body.adviceEffectiveness).toHaveProperty('rate');
+      });
+
+      it('should return zeros and null rate when no advices exist', async () => {
+        const app = createAppWithRoutes(deps);
+
+        const response = await request(app).get('/api/overview');
+
+        expect(response.body.adviceEffectiveness.effective).toBe(0);
+        expect(response.body.adviceEffectiveness.ineffective).toBe(0);
+        expect(response.body.adviceEffectiveness.unknown).toBe(0);
+        expect(response.body.adviceEffectiveness.rate).toBeNull();
+      });
+
+      it('should aggregate effectiveness stats across all experiences', async () => {
+        const app = createAppWithRoutes(deps);
+
+        // Seed experiences and advices
+        deps.sqliteStore.storeExperience(makeExperience({ id: 'exp-eff-1' }));
+        deps.sqliteStore.storeExperience(makeExperience({ id: 'exp-eff-2' }));
+        deps.sqliteStore.recordAdvice('s1', 'exp-eff-1');
+        deps.sqliteStore.recordAdvice('s2', 'exp-eff-2');
+        deps.sqliteStore.markAdvicesEffective('s1');
+
+        const response = await request(app).get('/api/overview');
+
+        expect(response.body.adviceEffectiveness.effective).toBe(1);
+        expect(response.body.adviceEffectiveness.unknown).toBe(1);
+      });
+    });
+
+    describe('GET /api/experiences/:id - includes effectiveness', () => {
+      it('should include effectiveness field in experience detail response', async () => {
+        const app = createAppWithRoutes(deps);
+
+        deps.sqliteStore.storeExperience(makeExperience({ id: 'exp-eff-detail' }));
+
+        const response = await request(app).get('/api/experiences/exp-eff-detail');
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveProperty('effectiveness');
+        expect(response.body.effectiveness).toHaveProperty('effective');
+        expect(response.body.effectiveness).toHaveProperty('ineffective');
+        expect(response.body.effectiveness).toHaveProperty('unknown');
+        expect(response.body.effectiveness).toHaveProperty('effectivenessRate');
+      });
+
+      it('should return zeros when experience has no advices', async () => {
+        const app = createAppWithRoutes(deps);
+
+        deps.sqliteStore.storeExperience(makeExperience({ id: 'exp-no-advices' }));
+
+        const response = await request(app).get('/api/experiences/exp-no-advices');
+
+        expect(response.body.effectiveness.effective).toBe(0);
+        expect(response.body.effectiveness.ineffective).toBe(0);
+        expect(response.body.effectiveness.unknown).toBe(0);
+      });
+    });
+  });
 });

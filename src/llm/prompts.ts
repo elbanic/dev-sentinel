@@ -94,6 +94,8 @@ Respond with a JSON object containing:
 
 Important: Do NOT use prescribed categories. Discover the categories organically from the actual data. Group related experiences by the themes you observe (e.g., "Build System", "Type System", "Testing Infrastructure", "API Integration", etc.).
 
+Each experience may include advice effectiveness data (how often the advice helped). Use this to assess which experiences are strong knowledge vs. which need enrichment. Include effectiveness observations in your insight when notable patterns emerge.
+
 Respond with a JSON object containing:
 
 - insight (string): A 2-4 sentence narrative summary of the developer's overall struggle patterns, trends, and growth areas. Write as if advising the developer directly. Use markdown formatting for emphasis (e.g., **bold** for key phrases).

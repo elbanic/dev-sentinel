@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { LLMProvider, FailureExperience, PatternAnalysisResult } from '../types/index';
+import type { LLMProvider, EffectivenessStats, FailureExperience, PatternAnalysisResult } from '../types/index';
 import { PatternAnalysisResultSchema } from '../types/index';
 import type { SqliteStore } from '../storage/sqlite-store';
 import { PROMPTS } from '../llm/prompts';
@@ -12,6 +12,7 @@ import { parseLLMJson } from '../utils/parse-llm-json';
 export function buildAnalysisInput(
   experiences: FailureExperience[],
   trendData: Array<{ date: string; count: number }>,
+  effectivenessMap?: Map<string, EffectivenessStats>,
 ): string {
   let input = '== Confirmed Experiences ==\n\n';
 
@@ -20,7 +21,15 @@ export function buildAnalysisInput(
     input += `Failed Approaches: ${exp.failedApproaches.join('; ')}\n`;
     input += `Successful Approach: ${exp.successfulApproach ?? '(unresolved)'}\n`;
     input += `Lessons: ${exp.lessons.join('; ')}\n`;
-    input += `Revision: v${exp.revision ?? 1}\n\n`;
+    input += `Revision: v${exp.revision ?? 1}\n`;
+    if (effectivenessMap) {
+      const stats = effectivenessMap.get(exp.id);
+      if (stats && (stats.effective + stats.ineffective) > 0) {
+        const rate = Math.round((stats.effectivenessRate ?? 0) * 100);
+        input += `Advice Effectiveness: ${stats.effective} effective, ${stats.ineffective} ineffective, ${stats.unknown} unknown (${rate}%)\n`;
+      }
+    }
+    input += '\n';
   }
 
   input += '== Frustration Trend (last 30 days) ==\n\n';
@@ -48,7 +57,9 @@ export async function analyzePatterns(
   }
 
   const trendData = sqliteStore.getFrustrationTrend(30);
-  const input = buildAnalysisInput(experiences, trendData);
+  const allStats = sqliteStore.getAllEffectivenessStats();
+  const effectivenessMap = new Map(allStats.map((s) => [s.experienceId, s]));
+  const input = buildAnalysisInput(experiences, trendData, effectivenessMap);
 
   const raw = await llmProvider.generateCompletion(PROMPTS.patternAnalysis, input, { think: true });
   const cleaned = stripThinkBlock(raw);

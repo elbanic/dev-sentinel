@@ -85,6 +85,21 @@ export async function handleUserPromptSubmit(input: {
       // Check if there is an existing frustrated flag
       const flag = sqliteStore.getFlag(sessionId);
       if (flag && flag.status === 'frustrated') {
+        // Feature 2: mark advices effective on resolution only
+        if (analysis.type === 'resolution') {
+          try { sqliteStore.markAdvicesEffective(sessionId); } catch { /* graceful */ }
+        }
+
+        // Feature 2: mark prior sessions' advices as ineffective on abandonment
+        if (analysis.type === 'abandonment') {
+          try {
+            const advisedIds = sqliteStore.getAdvisedExperienceIds(sessionId);
+            for (const expId of advisedIds) {
+              sqliteStore.markPriorAdviceIneffective(expId, sessionId);
+            }
+          } catch { /* graceful */ }
+        }
+
         sqliteStore.upgradeFlag(sessionId, 'capture');
       }
     }

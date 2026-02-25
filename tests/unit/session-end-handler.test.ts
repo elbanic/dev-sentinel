@@ -74,6 +74,8 @@ function makeMockSqliteStore() {
     runInTransaction: jest.fn(),
     getExperienceCount: jest.fn(),
     recordHookError: jest.fn(),
+    getAdvisedExperienceIds: jest.fn().mockReturnValue([]),
+    markPriorAdviceIneffective: jest.fn().mockReturnValue(0),
   };
 }
 
@@ -915,6 +917,93 @@ describe('SessionEndHandler - handleSessionEnd', () => {
 
       // Assert: should still return void (graceful degradation)
       expect(result).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // Feature 2: Feedback Loop - INEFFECTIVE tagging at session end
+  // =========================================================================
+  describe('Feature 2: INEFFECTIVE tagging at session end', () => {
+    it('should call markPriorAdviceIneffective per advised ID when frustrated flag exists', async () => {
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'frustrated', session_id: 'sess-ineff' }));
+      mockStore.getAdvisedExperienceIds.mockReturnValue(['exp-a', 'exp-b']);
+      mockedParseTranscriptFile.mockReturnValue(makeTranscriptData());
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleSessionEnd({
+        sessionId: 'sess-ineff',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.markPriorAdviceIneffective).toHaveBeenCalledWith('exp-a', 'sess-ineff');
+      expect(mockStore.markPriorAdviceIneffective).toHaveBeenCalledWith('exp-b', 'sess-ineff');
+    });
+
+    it('should NOT call markPriorAdviceIneffective when no advised IDs', async () => {
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'frustrated' }));
+      mockStore.getAdvisedExperienceIds.mockReturnValue([]);
+      mockedParseTranscriptFile.mockReturnValue(makeTranscriptData());
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleSessionEnd({
+        sessionId: 'sess-no-adv',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.markPriorAdviceIneffective).not.toHaveBeenCalled();
+    });
+
+    it('should still run capture pipeline when getAdvisedExperienceIds throws', async () => {
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'frustrated', session_id: 'sess-err-adv' }));
+      mockStore.getAdvisedExperienceIds.mockImplementation(() => {
+        throw new Error('DB error');
+      });
+      mockedParseTranscriptFile.mockReturnValue(makeTranscriptData());
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleSessionEnd({
+        sessionId: 'sess-err-adv',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      // Capture pipeline should still have run
+      expect(mockStore.upgradeFlag).toHaveBeenCalledWith('sess-err-adv', 'capture');
+      expect(mockStore.clearFlag).toHaveBeenCalledWith('sess-err-adv');
+    });
+
+    it('should still run capture pipeline when markPriorAdviceIneffective throws', async () => {
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'frustrated', session_id: 'sess-err-mark' }));
+      mockStore.getAdvisedExperienceIds.mockReturnValue(['exp-x']);
+      mockStore.markPriorAdviceIneffective.mockImplementation(() => {
+        throw new Error('DB error');
+      });
+      mockedParseTranscriptFile.mockReturnValue(makeTranscriptData());
+      mockStore.getPendingDrafts.mockReturnValue([]);
+
+      await handleSessionEnd({
+        sessionId: 'sess-err-mark',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.upgradeFlag).toHaveBeenCalledWith('sess-err-mark', 'capture');
+      expect(mockStore.clearFlag).toHaveBeenCalledWith('sess-err-mark');
+    });
+
+    it('should NOT run INEFFECTIVE logic when flag is capture or null', async () => {
+      mockStore.getFlag.mockReturnValue(makeFlagRow({ status: 'capture' }));
+
+      await handleSessionEnd({
+        sessionId: 'sess-capture',
+        transcriptPath: '/tmp/transcript.jsonl',
+        sqliteStore: mockStore as any,
+      });
+
+      expect(mockStore.getAdvisedExperienceIds).not.toHaveBeenCalled();
+      expect(mockStore.markPriorAdviceIneffective).not.toHaveBeenCalled();
     });
   });
 });

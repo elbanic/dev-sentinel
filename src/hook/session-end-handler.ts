@@ -40,6 +40,16 @@ export async function handleSessionEnd(input: {
       return;
     }
 
+    // Feature 2: cross-session INEFFECTIVE tagging
+    try {
+      const advisedIds = sqliteStore.getAdvisedExperienceIds(sessionId);
+      for (const expId of advisedIds) {
+        sqliteStore.markPriorAdviceIneffective(expId, sessionId);
+      }
+    } catch (e) {
+      debugLog(`[session-end] INEFFECTIVE tagging error (continuing): ${e}`, sentinelDir);
+    }
+
     const matchedExperienceId = flag.matched_experience_id ?? undefined;
 
     // Upgrade flag to 'capture' (best effort)
