@@ -33,15 +33,20 @@
 
 ---
 
-## Project Overview
+## Project Philosophy
 
-> **What broke you guards you.**
+> **Struggle Equity.** *What broke you guards you.*
 
-Dev Sentinel watches Claude Code sessions and does two things:
-1. **Warns** when you're about to repeat a past failure (Active Recall)
-2. **Captures** new failure experiences for future reference (Experience Capture)
+Dev Sentinel watches Claude Code sessions and turns developer struggles into reusable knowledge. Claude has zero knowledge of Sentinel — the prompt passes through unchanged.
 
-Claude has zero knowledge of Sentinel — the prompt passes through unchanged.
+### How It Works
+
+1. **Generate Experience from Frustration** — Detect struggle and turn it into structured memory.
+2. **Evolve the Experience** — Refine raw failure into hardened knowledge.
+3. **Validate the Guard** — Measure whether past lessons actually prevent repetition.
+4. **Connect the Patterns** — Link failures across contexts to uncover root causes.
+
+The result: struggles compound into engineering intuition.
 
 ---
 
