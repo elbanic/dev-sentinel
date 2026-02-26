@@ -6,6 +6,8 @@
 
 *What broke you guards you.*
 
+<img src="assets/demo.gif" alt="Dev Sentinel demo" width="800">
+
 </div>
 
 Dev Sentinel watches your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions and turns your struggles into reusable knowledge. Claude has zero knowledge of Sentinel — your prompt passes through unchanged.
