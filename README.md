@@ -6,7 +6,7 @@
 
 *What broke you guards you.*
 
-<img src="assets/demo.gif" alt="Dev Sentinel demo" width="800">
+https://github.com/user-attachments/assets/e6f6bde5-329c-4dc3-8617-c2918275dda6
 
 </div>
 
